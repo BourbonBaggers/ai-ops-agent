@@ -6,6 +6,8 @@ import { handlePolicy } from "./routes/policy.js";
 import { handleConfig } from "./routes/config.js";
 import { handleJobs } from "./routes/jobs.js";
 import { handleCalendar } from "./routes/calendar.js";
+import { handleCandidates } from "./routes/candidates.js";
+
 
 export async function handleRequest(request, env) {
   const url = new URL(request.url);
@@ -41,6 +43,10 @@ export async function handleRequest(request, env) {
 
   if (url.pathname.startsWith("/admin/calendar")) {
     return handleCalendar(request, env);
+  }
+
+  if (url.pathname.startsWith("/admin/candidates")) {
+    return handleCandidates(request, env);
   }
 
   return new Response("ai-ops-agent running (router 2026-02-17a)");
