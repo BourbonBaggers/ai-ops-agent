@@ -1,6 +1,4 @@
 import { handleHealth } from "./routes/health.js";
-import { handleDebug } from "./routes/debug.js";
-import { handleSeed } from "./routes/seed.js";
 import { handleContacts } from "./routes/contacts.js";
 import { handlePolicy } from "./routes/policy.js";
 import { handleConfig } from "./routes/config.js";
@@ -19,10 +17,6 @@ export async function handleRequest(request, env) {
 
   if (url.pathname === "/debug/whereami") {
     return handleDebug(request, env);
-  }
-
-  if (url.pathname === "/admin/seed") {
-    return handleSeed(request, env);
   }
 
   if (url.pathname.startsWith("/admin/contacts")) {
