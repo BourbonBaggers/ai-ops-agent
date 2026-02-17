@@ -1,0 +1,11 @@
+name = "ai-ops-agent"
+main = "src/index.js"
+compatibility_date = "2026-02-17"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai_ops_agent_db"
+database_id = "e44a2019-0694-4a86-bfcf-ad8b6f90df52"
+
+[vars]
+ENVIRONMENT = "dev"
