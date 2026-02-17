@@ -148,3 +148,4 @@ vite.config.ts.timestamp-*
 # Local-only seed data (contains personal emails)
 seeds/dev_seed.sql
 docs/policy.md
+docs/calendar.csv
