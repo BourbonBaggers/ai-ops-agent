@@ -1,4 +1,5 @@
-import { json, normalizePath, nowIso } from "../lib/utils.js";
+import { json, normalizePath, nowIso, nowInTzISO, getWeekOf, getPartsInTz } from "../lib/utils.js";
+import { loadSettings } from "../lib/settings.js";
 import { generateCandidatesForWeek } from "./candidates.js";
 
 // GET /jobs/tick
@@ -15,24 +16,22 @@ export async function handleJobs(request, env) {
 }
 
 async function tick(env) {
-  const now = new Date();
-  const nowZ = nowIso(); // for storage (ISO)
-  const config = await loadConfig(env);
+  const settings = loadSettings(env);
+  const tz = settings.timezone;
 
-  const week_of = getWeekOfChicago(now, config.timezone);
+  const now = new Date();
+  const nowZ = nowInTzISO(tz);
+  const week_of = getWeekOf(tz);
+  const { dow, hhmm } = getPartsInTz(now, tz);
+  const schedule = settings.schedule;
 
   // ensure weekly run exists
   const run = await ensureWeeklyRun(env, week_of);
 
   const actions = [];
 
-  const chicago = getChicagoParts(now, config.timezone);
-  const dow = chicago.dow;          // e.g. "TUESDAY"
-  const hhmm = chicago.hhmm;        // e.g. "09:45"
-
   // 1) Generate stage
-  if (dow === config.generate.dow && hhmm === config.generate.time) {
-    // only generate if not already generated and candidates don’t exist
+  if (dow === schedule.generate.dow && hhmm === schedule.generate.time) {
     const res = await generateCandidatesForWeek(env, week_of, { force: false });
     if (!res.skipped) actions.push("generate");
   }
@@ -41,16 +40,16 @@ async function tick(env) {
   const run2 = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`).bind(week_of).first();
 
   // 2) Lock stage
-  if (dow === config.lock.dow && hhmm === config.lock.time) {
+  if (dow === schedule.lock.dow && hhmm === schedule.lock.time) {
     const didLock = await lockWeeklyRun(env, run2, nowZ);
     if (didLock) actions.push("lock");
   }
 
-  // 3) Send stage (STUB)
-  // Marks sent_at/status but does NOT email yet.
+  // Refresh run after possible lock
   const run3 = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`).bind(week_of).first();
 
-  if (dow === config.send.dow && hhmm === config.send.time) {
+  // 3) Send stage (STUB)
+  if (dow === schedule.send.dow && hhmm === schedule.send.time) {
     const didSend = await sendStub(env, run3, nowZ);
     if (didSend) actions.push("send_stub");
   }
@@ -60,37 +59,17 @@ async function tick(env) {
     now: now.toISOString(),
     week_of,
     actions,
-    config
+    config: {
+      timezone: tz,
+      generate: schedule.generate,
+      lock: schedule.lock,
+      send: schedule.send
+    }
   });
 }
 
-async function loadConfig(env) {
-  const defaults = {
-    timezone: "America/Chicago",
-    generate: { dow: "FRIDAY", time: "09:00" },
-    lock: { dow: "TUESDAY", time: "09:45" },
-    send: { dow: "TUESDAY", time: "10:00" }
-  };
 
-  // config table: key/value_json/updated_at
-  const row = await env.DB.prepare(`SELECT value_json FROM config WHERE key = 'app' LIMIT 1`).first();
-
-  if (!row?.value_json) return defaults;
-
-  try {
-    const parsed = JSON.parse(row.value_json);
-    return {
-      timezone: parsed.timezone || defaults.timezone,
-      generate: parsed.generate || defaults.generate,
-      lock: parsed.lock || defaults.lock,
-      send: parsed.send || defaults.send
-    };
-  } catch {
-    return defaults;
-  }
-}
-
-async function ensureWeeklyRun(env, week_of) {
+export async function ensureWeeklyRun(env, week_of) {
   let run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`)
     .bind(week_of)
     .first();
@@ -110,7 +89,7 @@ async function ensureWeeklyRun(env, week_of) {
   return run;
 }
 
-async function lockWeeklyRun(env, run, nowZ) {
+export async function lockWeeklyRun(env, run, nowZ) {
   // If already locked, do nothing
   if (run.locked_at) return false;
 
@@ -136,9 +115,25 @@ async function lockWeeklyRun(env, run, nowZ) {
   return true;
 }
 
-async function sendStub(env, run, nowZ) {
-  // Don’t send twice
-  if (run.sent_at) return false;
+export async function sendStub(env, run, nowZ) {
+  // If we've already created a send row for this weekly_run, don't do it again.
+  const existing = await env.DB.prepare(`
+    SELECT id FROM sends
+    WHERE weekly_run_id = ?
+    LIMIT 1
+  `).bind(run.id).first();
+
+  if (existing?.id) {
+    // Also backfill weekly_runs in case earlier code inserted sends but never updated the run.
+    if (!run.sent_at) {
+      await env.DB.prepare(`
+        UPDATE weekly_runs
+        SET sent_at = ?, status = 'sent_stub', updated_at = ?
+        WHERE id = ?
+      `).bind(nowZ, nowZ, run.id).run();
+    }
+    return false;
+  }
 
   // If not locked yet, lock it right now (enforces “auto-authorized”)
   if (!run.locked_at) {
@@ -146,6 +141,67 @@ async function sendStub(env, run, nowZ) {
     run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE id = ?`).bind(run.id).first();
   }
 
+  // Ensure we have a selected candidate (lock should have done this, but belt+suspenders)
+  if (!run.selected_candidate_id) {
+    const first = await env.DB.prepare(`
+      SELECT id FROM candidates
+      WHERE weekly_run_id = ? AND rank = 1
+      LIMIT 1
+    `).bind(run.id).first();
+
+    if (first?.id) {
+      await env.DB.prepare(`
+        UPDATE weekly_runs
+        SET selected_candidate_id = ?, updated_at = ?
+        WHERE id = ?
+      `).bind(first.id, nowZ, run.id).run();
+
+      run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE id = ?`).bind(run.id).first();
+    }
+  }
+
+  const cand = run.selected_candidate_id
+    ? await env.DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(run.selected_candidate_id).first()
+    : null;
+
+  if (!cand) throw new Error("No selected candidate found to create send record");
+
+  const senderMailbox = env.SENDER_MAILBOX;
+  const replyTo = env.REPLY_TO;
+  if (!senderMailbox || !replyTo) throw new Error("Missing required mail environment variables.");
+
+  const sendId = crypto.randomUUID();
+  const trackingSalt = crypto.randomUUID();
+
+  const bodyHtml = `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
+    cand.body_markdown || ""
+  )}</pre>`;
+  const bodyText = (cand.body_markdown || "").replace(/\r\n/g, "\n");
+
+  await env.DB.prepare(`
+    INSERT INTO sends (
+      id, weekly_run_id, candidate_id,
+      subject, preview_text,
+      body_html, body_text,
+      sender_mailbox, reply_to,
+      tracking_salt,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    sendId,
+    run.id,
+    cand.id,
+    cand.subject,
+    cand.preview_text,
+    bodyHtml,
+    bodyText,
+    senderMailbox,
+    replyTo,
+    trackingSalt,
+    nowZ
+  ).run();
+
+  // Mark the run as "sent_stub"
   await env.DB.prepare(`
     UPDATE weekly_runs
     SET sent_at = ?, status = 'sent_stub', updated_at = ?
@@ -155,49 +211,32 @@ async function sendStub(env, run, nowZ) {
   return true;
 }
 
-// --- Chicago helpers ---
-// week_of = Monday date string in America/Chicago
-function getWeekOfChicago(now, tz) {
-  const parts = getChicagoParts(now, tz);
-
-  // Build a Date for Chicago local day (approx) by interpreting components as UTC,
-  // then do day math. Good enough for week bucket.
-  const chicagoDate = new Date(Date.UTC(parts.y, parts.m - 1, parts.d));
-  const dowIdx = chicagoDate.getUTCDay(); // 0=Sun..6=Sat
-  const mondayOffset = (dowIdx + 6) % 7;  // Sun->6, Mon->0, Tue->1...
-  chicagoDate.setUTCDate(chicagoDate.getUTCDate() - mondayOffset);
-
-  const yyyy = chicagoDate.getUTCFullYear();
-  const mm = String(chicagoDate.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(chicagoDate.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function getChicagoParts(now, tz) {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  });
+async function getTableColumns(env, tableName) {
+  const res = await env.DB.prepare(`PRAGMA table_info(${tableName});`).all();
+  // rows contain: cid, name, type, notnull, dflt_value, pk
+  return new Set(res.results.map(r => r.name));
+}
 
-  const parts = fmt.formatToParts(now).reduce((acc, p) => {
-    acc[p.type] = p.value;
-    return acc;
-  }, {});
+async function insertRowFlexible(env, tableName, dataObj) {
+  const cols = await getTableColumns(env, tableName);
 
-  const dow = parts.weekday.toUpperCase(); // "TUESDAY"
-  const hhmm = `${parts.hour}:${parts.minute}`;
+  const keys = Object.keys(dataObj).filter(k => cols.has(k));
+  if (keys.length === 0) {
+    throw new Error(`No matching columns to insert into ${tableName}`);
+  }
 
-  return {
-    y: Number(parts.year),
-    m: Number(parts.month),
-    d: Number(parts.day),
-    dow,
-    hhmm
-  };
+  const placeholders = keys.map(() => "?").join(", ");
+  const sql = `INSERT INTO ${tableName} (${keys.join(", ")}) VALUES (${placeholders})`;
+  const values = keys.map(k => dataObj[k]);
+
+  await env.DB.prepare(sql).bind(...values).run();
 }

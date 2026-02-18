@@ -3,11 +3,10 @@ import { MockProvider } from "../providers/mockProvider.js";
 
 // Public exports so jobs.js can call generation without HTTP
 export async function generateCandidatesForWeek(env, week_of, { force = false } = {}) {
-  if (!isDate(week_of)) {
-    throw new Error("week_of must be YYYY-MM-DD");
-  }
+  week_of = normalizeWeekOf(week_of);
 
   const run = await ensureWeeklyRun(env, week_of);
+    const now = nowIso();
 
   // Guard: do not overwrite existing candidates unless forced
   const existing = await env.DB.prepare(
@@ -35,6 +34,36 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
   const horizon = await getCalendarHorizon(env, 90);
 
   // Reset candidates for this weekly_run if force OR exists
+    if (force) {
+    // If we already created sends for this weekly run, those rows reference candidates.
+    // So delete children first (send_recipients -> sends), then candidates.
+    await env.DB.prepare(`
+      DELETE FROM send_recipients
+      WHERE send_id IN (SELECT id FROM sends WHERE weekly_run_id = ?)
+    `).bind(run.id).run();
+
+    await env.DB.prepare(`
+      DELETE FROM sends
+      WHERE weekly_run_id = ?
+    `).bind(run.id).run();
+
+    await env.DB.prepare(`
+      DELETE FROM candidates
+      WHERE weekly_run_id = ?
+    `).bind(run.id).run();
+
+    // Optional: reset weekly run state so regen is "clean"
+    await env.DB.prepare(`
+      UPDATE weekly_runs
+      SET generated_at = NULL,
+          locked_at = NULL,
+          sent_at = NULL,
+          selected_candidate_id = NULL,
+          status = 'pending',
+          updated_at = ?
+      WHERE id = ?
+    `).bind(now, run.id).run();
+  }
   await env.DB.prepare(`DELETE FROM candidates WHERE weekly_run_id = ?`).bind(run.id).run();
 
   const provider = new MockProvider();
@@ -49,7 +78,7 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
     }
   });
 
-  const now = nowIso();
+
   const stmts = [];
 
   for (let i = 0; i < generated.length; i++) {
@@ -180,6 +209,16 @@ export async function handleCandidates(request, env) {
   }
 
   return json({ status: "error", message: "Not found" }, 404);
+}
+
+function normalizeWeekOf(input) {
+  if (typeof input !== "string") throw new Error("week_of must be a string");
+  const s = input.trim();
+
+  // Accept YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS...
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+
+  throw new Error("week_of must be YYYY-MM-DD");
 }
 
 function hydrateCandidateRow(r) {

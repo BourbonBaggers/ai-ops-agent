@@ -6,11 +6,15 @@ import { handleJobs } from "./routes/jobs.js";
 import { handleCalendar } from "./routes/calendar.js";
 import { handleCandidates } from "./routes/candidates.js";
 import { handleWeekly } from "./routes/weekly.js";
+import { handleDev } from "./routes/dev.js";
 
 
 export async function handleRequest(request, env) {
   const url = new URL(request.url);
   console.log("ROUTER VERSION", "2026-02-17a", "handleHealth type:", typeof handleHealth);
+
+  const devResp = await handleDev(request, env);
+  if (devResp) return devResp;
 
   if (url.pathname === "/health") {
     return handleHealth(request, env);
