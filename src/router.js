@@ -25,10 +25,6 @@ export async function handleRequest(request, env) {
     return handleHealth(request, env);
   }
 
-  if (url.pathname === "/debug/whereami") {
-    return handleDebug(request, env);
-  }
-
   if (url.pathname.startsWith("/admin/contacts")) {
     return handleContacts(request, env);
   }

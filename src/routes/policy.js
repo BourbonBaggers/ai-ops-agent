@@ -47,7 +47,8 @@ async function getActivePolicy(env) {
 
 async function createPolicyVersion(request, env) {
   // Accept JSON: { title, body_markdown }
-  const body = await request.json();
+  const { ok, body } = await requireJsonBody(request);
+  if (!ok) return json({ status: "error", message: "JSON body required" }, 400);
 
   const title = strOrNull(body.title) || "Marketing Standards Policy";
   const body_markdown = strOrNull(body.body_markdown);
