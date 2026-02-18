@@ -11,10 +11,6 @@ export async function handleWeekly(request, env) {
 
   let week_of = url.searchParams.get("week_of");
 
-  if (!week_of) {
-    // default to current week (Monday) in America/Chicago
-    week_of = currentWeekOf("America/Chicago");
-  }
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(week_of)) {
     return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
@@ -61,28 +57,3 @@ function safeJson(s, fallback) {
   try { return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 }
 
-function currentWeekOf(tz) {
-  const now = new Date();
-  const parts = chicagoParts(now, tz); // y/m/d in tz
-  const d = new Date(Date.UTC(parts.y, parts.m - 1, parts.d));
-  const dowIdx = d.getUTCDay();      // 0=Sun..6=Sat
-  const mondayOffset = (dowIdx + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - mondayOffset);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-}
-
-function chicagoParts(now, tz) {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  });
-
-  const p = fmt.formatToParts(now).reduce((acc, part) => {
-    acc[part.type] = part.value;
-    return acc;
-  }, {});
-
-  return { y: Number(p.year), m: Number(p.month), d: Number(p.day) };
-}
