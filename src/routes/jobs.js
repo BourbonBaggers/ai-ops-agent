@@ -6,11 +6,19 @@ import { generateCandidatesForWeek } from "./candidates.js";
 
 export async function handleJobs(request, env) {
   const url = new URL(request.url);
-  const path = normalizePath(url.pathname);
-  const method = request.method.toUpperCase();
+  const pathname = url.pathname.replace(/\/+$/, "") || "/";
 
-  if (path === "/jobs/tick" && (method === "GET" || method === "POST")) {
-    return tick(request, env); // <-- pass request
+  if (pathname === "/jobs") {
+    return json({
+      status: "ok",
+      endpoints: [
+        "POST /jobs/tick",
+      ],
+    });
+  }
+
+  if (pathname === "/jobs/tick" && request.method === "POST") {
+    return tick(request, env);
   }
 
   return json({ status: "error", message: "Not found" }, 404);
