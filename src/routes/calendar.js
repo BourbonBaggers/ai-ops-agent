@@ -1,4 +1,5 @@
-import { json, nowIso, normalizePath } from "../lib/utils.js";
+import { json, normalizePath } from "../lib/utils.js";
+import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
 
 // GET /admin/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD
 // POST /admin/calendar/load  (CSV in body)
@@ -41,7 +42,7 @@ export async function handleCalendar(request, env) {
     const minDate = dates[0];
     const maxDate = dates[dates.length - 1];
 
-    const now = nowIso();
+    const now = nowUtcIso();
 
     // Build atomic batch: delete range, insert all
     const stmts = [];

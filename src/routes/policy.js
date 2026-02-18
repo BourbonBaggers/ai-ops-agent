@@ -1,4 +1,5 @@
-import { json, nowIso, clampInt, normalizePath, strOrNull, str } from "../lib/utils.js";
+import { json, normalizePath } from "../lib/utils.js";
+import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
 
 export async function handlePolicy(request, env) {
   const url = new URL(request.url);
@@ -56,7 +57,7 @@ async function createPolicyVersion(request, env) {
   }
 
   const id = crypto.randomUUID();
-  const created_at = nowIso();
+  const created_at = nowUtcIso();
 
   // Make new active, deactivate previous (atomic via batch)
   const stmts = [
@@ -96,7 +97,7 @@ async function loadPolicyMarkdown(request, env) {
 
   const title = extractTitleFromMarkdown(body_markdown) || "Marketing Standards Policy";
   const id = crypto.randomUUID();
-  const created_at = nowIso();
+  const created_at = nowUtcIso();
 
   await env.DB.batch([
     env.DB.prepare(`UPDATE policy_versions SET is_active = 0 WHERE is_active = 1`),

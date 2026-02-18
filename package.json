@@ -1,0 +1,25 @@
+{
+  "name": "ai-ops-agent",
+  "version": "1.0.0",
+  "description": "A governance-first, serverless AI operator that: - generates weekly outbound email candidates, - supports human approval or auto-default selection, - sends via Microsoft 365 (Graph), - tracks opens/clicks/unsubs, - preserves full send history, - runs on Cloudflare Workers with strict cost controls.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BourbonBaggers/ai-ops-agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/BourbonBaggers/ai-ops-agent/issues"
+  },
+  "homepage": "https://github.com/BourbonBaggers/ai-ops-agent#readme"
+}

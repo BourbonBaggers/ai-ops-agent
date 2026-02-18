@@ -7,6 +7,7 @@ import { handleCalendar } from "./routes/calendar.js";
 import { handleCandidates } from "./routes/candidates.js";
 import { handleWeekly } from "./routes/weekly.js";
 import { handleDev } from "./routes/dev.js";
+import { handleAdminSends } from "./routes/admin_sends.js";
 
 
 export async function handleRequest(request, env) {
@@ -15,6 +16,10 @@ export async function handleRequest(request, env) {
 
   const devResp = await handleDev(request, env);
   if (devResp) return devResp;
+
+  if (url.pathname === "/admin/sends" && request.method === "GET") {
+    return handleAdminSends(request, env);
+  }
 
   if (url.pathname === "/health") {
     return handleHealth(request, env);
@@ -51,6 +56,8 @@ export async function handleRequest(request, env) {
   if (url.pathname.startsWith("/admin/weekly")) {
     return handleWeekly(request, env);
   }
+
+
 
   return new Response("ai-ops-agent running (router 2026-02-17a)");
 }
