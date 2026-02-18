@@ -1,4 +1,5 @@
-import { json, nowIso, normalizeEmail, strOrNull, clampInt, normalizePath } from "../lib/utils.js";
+import { json, normalizePath } from "../lib/utils.js";
+import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
 import { parseCsv, mapContactRow, csvEscape } from "../lib/csv.js";
 
 export async function handleContacts(request, env) {
@@ -70,7 +71,7 @@ async function createContact(request, env) {
   if (!email) return json({ status: "error", message: "email is required" }, 400);
 
   const id = crypto.randomUUID();
-  const now = nowIso();
+  const now = nowUtcIso();
 
   await env.DB.prepare(`
     INSERT INTO contacts (
@@ -106,7 +107,7 @@ async function updateContact(id, request, env) {
   if (!exists) return json({ status: "error", message: "not found" }, 404);
 
   const body = await request.json();
-  const now = nowIso();
+  const now = nowUtcIso();
 
   const email = body.email !== undefined ? normalizeEmail(body.email) : null;
   if (body.email !== undefined && !email) {
@@ -168,7 +169,7 @@ async function importContacts(request, env) {
   const mapped = rows.map(mapContactRow);
 
   // Batch UPSERTs = atomic all-or-nothing
-  const now = nowIso();
+  const now = nowUtcIso();
   const stmts = [];
   let processed = 0;
   let skipped = 0;

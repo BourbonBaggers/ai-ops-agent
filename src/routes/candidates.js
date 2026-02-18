@@ -1,4 +1,5 @@
-import { json, normalizePath, nowIso } from "../lib/utils.js";
+import { json, normalizePath } from "../lib/utils.js";
+import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
 import { MockProvider } from "../providers/mockProvider.js";
 
 // Public exports so jobs.js can call generation without HTTP
@@ -6,7 +7,7 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
   week_of = normalizeWeekOf(week_of);
 
   const run = await ensureWeeklyRun(env, week_of);
-    const now = nowIso();
+    const now = nowUtcIso();
 
   // Guard: do not overwrite existing candidates unless forced
   const existing = await env.DB.prepare(
@@ -191,7 +192,7 @@ export async function handleCandidates(request, env) {
       return json({ status: "error", message: "Candidate not found. Generate candidates first." }, 400);
     }
 
-    const now = nowIso();
+    const now = nowUtcIso();
     await env.DB.prepare(`
       UPDATE weekly_runs
       SET selected_candidate_id = ?, focus_notes = COALESCE(?, focus_notes), status = 'selected', updated_at = ?
@@ -244,7 +245,7 @@ async function ensureWeeklyRun(env, week_of) {
   if (run) return run;
 
   const id = crypto.randomUUID();
-  const now = nowIso();
+  const now = nowUtcIso();
   await env.DB.prepare(`
     INSERT INTO weekly_runs (id, week_of, status, created_at, updated_at)
     VALUES (?, ?, 'pending', ?, ?)

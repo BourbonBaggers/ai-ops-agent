@@ -1,73 +1,89 @@
-import { json, normalizePath, nowIso, nowInTzISO, getWeekOf, getPartsInTz } from "../lib/utils.js";
+import { json, normalizePath } from "../lib/utils.js";
+import { nowUtcIso, nowInTzISO, getWeekOf, getPartsInTz } from "../lib/time.js";
 import { loadSettings } from "../lib/settings.js";
 import { generateCandidatesForWeek } from "./candidates.js";
 
-// GET /jobs/tick
+
 export async function handleJobs(request, env) {
   const url = new URL(request.url);
   const path = normalizePath(url.pathname);
   const method = request.method.toUpperCase();
 
   if (path === "/jobs/tick" && (method === "GET" || method === "POST")) {
-    return tick(env);
+    return tick(request, env); // <-- pass request
   }
 
   return json({ status: "error", message: "Not found" }, 404);
 }
 
-async function tick(env) {
+async function tick(request, env) {
   const settings = loadSettings(env);
   const tz = settings.timezone;
-
-  const now = new Date();
-  const nowZ = nowInTzISO(tz);
-  const week_of = getWeekOf(tz);
-  const { dow, hhmm } = getPartsInTz(now, tz);
   const schedule = settings.schedule;
 
-  // ensure weekly run exists
-  const run = await ensureWeeklyRun(env, week_of);
+  const now = getNowForTick(request, env);     // <-- key point
+  const nowUtc = now.toISOString();
+  const nowLocal = nowInTzISO(tz);
+
+  const week_of = getWeekOf(tz);
+  const { dow, hhmm } = getPartsInTz(now, tz);
 
   const actions = [];
 
-  // 1) Generate stage
+  await ensureWeeklyRun(env, week_of);
+
   if (dow === schedule.generate.dow && hhmm === schedule.generate.time) {
     const res = await generateCandidatesForWeek(env, week_of, { force: false });
     if (!res.skipped) actions.push("generate");
   }
 
-  // Refresh run after possible generate
   const run2 = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`).bind(week_of).first();
 
-  // 2) Lock stage
   if (dow === schedule.lock.dow && hhmm === schedule.lock.time) {
-    const didLock = await lockWeeklyRun(env, run2, nowZ);
+    const didLock = await lockWeeklyRun(env, run2, nowUtc);
     if (didLock) actions.push("lock");
   }
 
-  // Refresh run after possible lock
   const run3 = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`).bind(week_of).first();
 
-  // 3) Send stage (STUB)
   if (dow === schedule.send.dow && hhmm === schedule.send.time) {
-    const didSend = await sendStub(env, run3, nowZ);
+    const didSend = await sendStub(env, run3, nowUtc);
     if (didSend) actions.push("send_stub");
   }
 
   return json({
     status: "ok",
-    now: now.toISOString(),
+    now_utc: nowUtc,
+    now_local: nowLocal,
+    tz,
     week_of,
     actions,
     config: {
       timezone: tz,
       generate: schedule.generate,
       lock: schedule.lock,
-      send: schedule.send
-    }
+      send: schedule.send,
+    },
   });
 }
 
+// dev-only time override for deterministic tests
+function getNowForTick(request, env) {
+  const url = new URL(request.url);
+
+  // Only allow override in dev
+  if (env.ENVIRONMENT !== "dev") return new Date();
+
+  const nowQ = url.searchParams.get("now");
+  if (!nowQ) return new Date();
+
+  // Accept either ISO or "YYYY-MM-DDTHH:mm:ss" (treated as local-ish; still becomes a Date)
+  const d = new Date(nowQ);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error("invalid now override; expected ISO date-time");
+  }
+  return d;
+}
 
 export async function ensureWeeklyRun(env, week_of) {
   let run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`)
@@ -76,7 +92,7 @@ export async function ensureWeeklyRun(env, week_of) {
   if (run) return run;
 
   const id = crypto.randomUUID();
-  const now = nowIso();
+  const now = nowUtcIso();
 
   await env.DB.prepare(`
     INSERT INTO weekly_runs (id, week_of, status, created_at, updated_at)
@@ -117,6 +133,7 @@ export async function lockWeeklyRun(env, run, nowZ) {
 
 export async function sendStub(env, run, nowZ) {
   // If we've already created a send row for this weekly_run, don't do it again.
+  // (This is conservative. With your new uniqueness constraint, this is still fine.)
   const existing = await env.DB.prepare(`
     SELECT id FROM sends
     WHERE weekly_run_id = ?
@@ -124,7 +141,7 @@ export async function sendStub(env, run, nowZ) {
   `).bind(run.id).first();
 
   if (existing?.id) {
-    // Also backfill weekly_runs in case earlier code inserted sends but never updated the run.
+    // Backfill weekly_runs in case earlier code inserted sends but never updated the run.
     if (!run.sent_at) {
       await env.DB.prepare(`
         UPDATE weekly_runs
@@ -137,7 +154,7 @@ export async function sendStub(env, run, nowZ) {
 
   // If not locked yet, lock it right now (enforces “auto-authorized”)
   if (!run.locked_at) {
-    await lockWeeklyRun(env, run, nowZ);
+    await lockWeeklyRun(env, run, nowUtcIso);
     run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE id = ?`).bind(run.id).first();
   }
 
@@ -178,14 +195,11 @@ export async function sendStub(env, run, nowZ) {
   )}</pre>`;
   const bodyText = (cand.body_markdown || "").replace(/\r\n/g, "\n");
 
-  await env.DB.prepare(`
-    INSERT INTO sends (
+  const insert = await env.DB.prepare(`
+    INSERT OR IGNORE INTO sends (
       id, weekly_run_id, candidate_id,
-      subject, preview_text,
-      body_html, body_text,
-      sender_mailbox, reply_to,
-      tracking_salt,
-      created_at
+      subject, preview_text, body_html, body_text,
+      sender_mailbox, reply_to, tracking_salt, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     sendId,
@@ -200,6 +214,9 @@ export async function sendStub(env, run, nowZ) {
     trackingSalt,
     nowZ
   ).run();
+
+  const didInsert = (insert?.meta?.changes ?? 0) > 0;
+  if (!didInsert) return false;
 
   // Mark the run as "sent_stub"
   await env.DB.prepare(`
