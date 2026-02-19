@@ -8,52 +8,82 @@ import { handleCandidates } from "./routes/candidates.js";
 import { handleWeekly } from "./routes/weekly.js";
 import { handleDev } from "./routes/dev.js";
 import { handleAdminSends } from "./routes/admin_sends.js";
-
+import { json } from "./lib/utils.js";
 
 export async function handleRequest(request, env) {
-  const url = new URL(request.url);
-  console.log("ROUTER VERSION", "2026-02-17a", "handleHealth type:", typeof handleHealth);
+  try {
+    const url = new URL(request.url);
+    const { pathname } = url;
 
-  const devResp = await handleDev(request, env);
-  if (devResp) return devResp;
+    console.log(
+      "ROUTER VERSION",
+      "2026-02-17a",
+      "handleHealth type:",
+      typeof handleHealth
+    );
 
-  if (url.pathname === "/admin/sends" && request.method === "GET") {
-    return handleAdminSends(request, env);
+    // Dev routes (e.g., /dev/ping, /dev/run). This handler decides if it owns the route.
+    const devResp = await handleDev(request, env);
+    if (devResp) return devResp;
+
+    // Health
+    if (pathname === "/health") {
+      return await handleHealth(request, env);
+    }
+
+    // Admin
+    if (pathname.startsWith("/admin/sends")) {
+      return await handleAdminSends(request, env);
+    }
+
+    if (pathname.startsWith("/admin/contacts")) {
+      return await handleContacts(request, env);
+    }
+
+    if (pathname.startsWith("/admin/policy")) {
+      return await handlePolicy(request, env);
+    }
+
+    if (pathname.startsWith("/admin/config")) {
+      return await handleConfig(request, env);
+    }
+
+    if (pathname.startsWith("/admin/calendar")) {
+      return await handleCalendar(request, env);
+    }
+
+    if (pathname.startsWith("/admin/candidates")) {
+      return await handleCandidates(request, env);
+    }
+
+    if (pathname.startsWith("/admin/weekly")) {
+      return await handleWeekly(request, env);
+    }
+
+    // Jobs (support both /jobs and /jobs/)
+    if (pathname === "/jobs" || pathname.startsWith("/jobs/")) {
+      return await handleJobs(request, env);
+    }
+
+    // Default
+    return json({ status: "error", message: "Not found" }, 404);
+  } catch (err) {
+    // If a handler throws a Response, pass it through unchanged.
+    if (err instanceof Response) return err;
+
+    const status =
+      (typeof err?.status === "number" && err.status >= 100 && err.status <= 599)
+        ? err.status
+        : 500;
+
+    const message =
+      status === 500
+        ? "Internal Server Error"
+        : (err?.message || "Request error");
+
+    // Log useful info without turning it into a second incident.
+    console.error(err?.stack || err);
+
+    return json({ status: "error", message }, status);
   }
-
-  if (url.pathname === "/health") {
-    return handleHealth(request, env);
-  }
-
-  if (url.pathname.startsWith("/admin/contacts")) {
-    return handleContacts(request, env);
-  }
-
-  if (url.pathname.startsWith("/admin/policy")) {
-    return handlePolicy(request, env);
-  }
-
-  if (url.pathname.startsWith("/admin/config")) {
-  return handleConfig(request, env);
-  }
-
-  if (url.pathname.startsWith("/jobs/")) {
-    return handleJobs(request, env);
-  }
-
-  if (url.pathname.startsWith("/admin/calendar")) {
-    return handleCalendar(request, env);
-  }
-
-  if (url.pathname.startsWith("/admin/candidates")) {
-    return handleCandidates(request, env);
-  }
-
-  if (url.pathname.startsWith("/admin/weekly")) {
-    return handleWeekly(request, env);
-  }
-
-
-
-  return new Response("ai-ops-agent running (router 2026-02-17a)");
 }

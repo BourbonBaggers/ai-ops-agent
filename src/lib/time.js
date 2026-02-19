@@ -80,3 +80,10 @@ export function getWeekOf(tz, now = new Date()) {
 
   return utc.toISOString().slice(0, 10);
 }
+
+export function addDays(ymd, days) {
+  // ymd = "YYYY-MM-DD"
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}

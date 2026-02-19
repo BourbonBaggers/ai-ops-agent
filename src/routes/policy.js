@@ -1,4 +1,4 @@
-import { json, normalizePath } from "../lib/utils.js";
+import { json, normalizePath, requireJsonBody } from "../lib/utils.js";
 import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
 
 export async function handlePolicy(request, env) {
