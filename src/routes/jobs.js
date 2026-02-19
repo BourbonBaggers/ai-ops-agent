@@ -162,7 +162,7 @@ export async function sendStub(env, run, nowZ) {
 
   // If not locked yet, lock it right now (enforces “auto-authorized”)
   if (!run.locked_at) {
-    await lockWeeklyRun(env, run, nowUtcIso);
+    await lockWeeklyRun(env, run, nowZ);
     run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE id = ?`).bind(run.id).first();
   }
 
@@ -191,9 +191,23 @@ export async function sendStub(env, run, nowZ) {
 
   if (!cand) throw new Error("No selected candidate found to create send record");
 
-  const senderMailbox = env.SENDER_MAILBOX;
-  const replyTo = env.REPLY_TO;
-  if (!senderMailbox || !replyTo) throw new Error("Missing required mail environment variables.");
+  const isDev = (env.ENVIRONMENT || "").toLowerCase() === "dev";
+
+  // Support both legacy + current names
+  const senderMailbox =
+    env.MAIL_SENDER_UPN ||
+    env.SENDER_MAILBOX ||
+    (isDev ? "stub-sender@example.com" : null);
+
+  const replyTo =
+    env.REPLY_TO ||
+    (isDev ? "stub-replyto@example.com" : null);
+
+  if (!senderMailbox || !replyTo) {
+    throw new Error(
+      "Missing required mail environment variables. Expected MAIL_SENDER_UPN (or SENDER_MAILBOX) and REPLY_TO."
+    );
+  }
 
   const sendId = crypto.randomUUID();
   const trackingSalt = crypto.randomUUID();
