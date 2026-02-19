@@ -1,5 +1,10 @@
 // tests/_helpers.mjs
 import assert from "node:assert/strict";
+// tests/_helpers.mjs
+import fs from "node:fs";
+import path from "node:path";
+
+
 
 export const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:8787";
 
@@ -50,18 +55,47 @@ export function assertJsonBody({ res, text, json, url }) {
   return json;
 }
 
-export async function getJson(path) {
-  const r = await fetchJson(path);
-  assertStatus(r, 200);
+// Overloads supported:
+//   getJson(path)
+//   getJson(path, expectedStatus)
+//   getJson(path, opts)
+//   getJson(path, opts, expectedStatus)
+export async function getJson(path, arg2, arg3) {
+  let opts = {};
+  let expectedStatus = 200;
+
+  if (typeof arg2 === "number") {
+    expectedStatus = arg2;
+  } else if (arg2 && typeof arg2 === "object") {
+    opts = arg2;
+    if (typeof arg3 === "number") expectedStatus = arg3;
+  }
+
+  const r = await fetchJson(path, opts);
+  assertStatus(r, expectedStatus);
   return assertJsonBody(r);
 }
 
-export async function postJson(path, body) {
-  const r = await fetchJson(path, { method: "POST", body });
-  assertStatus(r, 200);
+// Overloads supported:
+//   postJson(path, body)
+//   postJson(path, body, expectedStatus)
+//   postJson(path, body, opts)
+//   postJson(path, body, opts, expectedStatus)
+export async function postJson(path, body, arg3, arg4) {
+  let opts = {};
+  let expectedStatus = 200;
+
+  if (typeof arg3 === "number") {
+    expectedStatus = arg3;
+  } else if (arg3 && typeof arg3 === "object") {
+    opts = arg3;
+    if (typeof arg4 === "number") expectedStatus = arg4;
+  }
+
+  const r = await fetchJson(path, { ...opts, method: "POST", body });
+  assertStatus(r, expectedStatus);
   return assertJsonBody(r);
 }
-
 /**
  * Convenience for endpoints that accept query strings.
  */
