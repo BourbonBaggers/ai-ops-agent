@@ -5,10 +5,12 @@ import { postJson, fetchJson, assertJsonBody, assertStatus } from "./_helpers.mj
 
 const DEV_EMAIL_KEY = process.env.DEV_EMAIL_KEY;
 const DEV_EMAIL_TEST_TO = process.env.DEV_EMAIL_TEST_TO;
+const REPLY_TO = process.env.REPLY_TO;
 
 test("dev/email smoke: sends with key", async () => {
   assert.ok(DEV_EMAIL_KEY, "DEV_EMAIL_KEY is required for this test");
   assert.ok(DEV_EMAIL_TEST_TO, "DEV_EMAIL_TEST_TO is required for this test");
+  assert.ok(REPLY_TO, "REPLY_TO is required for this test");
 
   const r = await postJson(
     "/dev/email",

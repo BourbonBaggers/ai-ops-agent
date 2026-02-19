@@ -45,12 +45,19 @@ export async function graphSendMail(env, { fromUpn, to, subject, text }) {
   // POST /users/{id|UPN}/sendMail  [oai_citation:5‡Microsoft Learn](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0)
   const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromUpn)}/sendMail`;
 
+  const replyTo = (env.REPLY_TO || "").trim();
+
+  const message = {
+    subject,
+    body: { contentType: "Text", content: text },
+    toRecipients: [{ emailAddress: { address: to } }],
+    ...(replyTo
+      ? { replyTo: [{ emailAddress: { address: replyTo } }] }
+      : {}),
+  };
+
   const payload = {
-    message: {
-      subject,
-      body: { contentType: "Text", content: text },
-      toRecipients: [{ emailAddress: { address: to } }],
-    },
+    message,
     saveToSentItems: "true",
   };
 
