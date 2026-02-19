@@ -31,8 +31,46 @@ export function normalizePath(p) {
   return p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
 }
 
+export async function readJsonBody(request) {
+  // Returns parsed object, or null if body missing/invalid
+  const text = await request.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
+export function badRequest(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
 
+export async function requireJsonBody(request) {
+  const ct = request.headers.get("content-type") || "";
+  if (!ct.toLowerCase().includes("application/json")) {
+    throw badRequest("Expected application/json body");
+  }
 
+  // Use text() so empty body is detectable (request.json() throws a generic SyntaxError)
+  const raw = await request.text();
+  if (!raw || !raw.trim()) {
+    throw badRequest("Missing JSON body");
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw badRequest("Invalid JSON body");
+  }
+}
+
+export function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
 
 

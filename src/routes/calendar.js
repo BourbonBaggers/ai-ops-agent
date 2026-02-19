@@ -1,81 +1,43 @@
-import { json, normalizePath } from "../lib/utils.js";
-import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
+import { json, normalizePath, badRequest } from "../lib/utils.js";
+import { getWeekOf, addDays } from "../lib/time.js";
 
-// GET /admin/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD
-// POST /admin/calendar/load  (CSV in body)
+function isYmd(s) {
+  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
 
 export async function handleCalendar(request, env) {
   const url = new URL(request.url);
-  const path = normalizePath(url.pathname);
-  const method = request.method.toUpperCase();
+  const pathname = normalizePath(url.pathname);
 
-  if (path === "/admin/calendar" && method === "GET") {
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
-
-    if (!isDate(from) || !isDate(to)) {
-      return json({ status: "error", message: "Query params 'from' and 'to' must be YYYY-MM-DD" }, 400);
-    }
-
-    const rows = await env.DB.prepare(
-      `SELECT id, date, category, title, notes, created_at
-       FROM calendar_items
-       WHERE date >= ? AND date <= ?
-       ORDER BY date ASC, category ASC, title ASC`
-    ).bind(from, to).all();
-
-    return json({ status: "ok", count: rows.results.length, items: rows.results });
+  if (request.method !== "GET") {
+    return json({ status: "error", message: "Not found" }, 404);
   }
 
-  // CSV loader (atomic replace of date range contained in file)
-  if (path === "/admin/calendar/load" && method === "POST") {
-    const csv = (await request.text()).trim();
-    if (!csv) return json({ status: "error", message: "Empty body" }, 400);
+const q = new URL(request.url).searchParams;
+const week_of = q.get("week_of");
+let from = q.get("from");
+let to = q.get("to");
 
-    const parsed = parseCsvCalendar(csv);
-    if (parsed.errors.length) {
-      return json({ status: "error", message: "CSV validation failed", errors: parsed.errors }, 400);
-    }
-
-    // Determine range to replace (Option A)
-    const dates = parsed.items.map(x => x.date).sort();
-    const minDate = dates[0];
-    const maxDate = dates[dates.length - 1];
-
-    const now = nowUtcIso();
-
-    // Build atomic batch: delete range, insert all
-    const stmts = [];
-    stmts.push(
-      env.DB.prepare(`DELETE FROM calendar_items WHERE date >= ? AND date <= ?`).bind(minDate, maxDate)
-    );
-
-    for (const item of parsed.items) {
-      stmts.push(
-        env.DB.prepare(`
-          INSERT INTO calendar_items (id, date, category, title, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).bind(
-          crypto.randomUUID(),
-          item.date,
-          item.category,
-          item.title,
-          item.notes ?? null,
-          now
-        )
-      );
-    }
-
-    await env.DB.batch(stmts);
-
-    return json({
-      status: "ok",
-      replaced_range: { from: minDate, to: maxDate },
-      inserted: parsed.items.length
-    });
+if (week_of) {
+  if (!isYmd(week_of)) throw badRequest("Query param 'week_of' must be YYYY-MM-DD");
+  from = week_of;
+  to = addDays(week_of, 7); // or 6 if you mean inclusive end-date
+} else {
+  if (!isYmd(from) || !isYmd(to)) {
+    throw badRequest("Query params 'from' and 'to' must be YYYY-MM-DD");
   }
+}
 
-  return json({ status: "error", message: "Not found" }, 404);
+  // ... existing calendar query logic using from/to ...
+
+  return json({
+    status: "ok",
+    week_of: week_of ?? null, // <-- add this
+    from,
+    to,
+    // ...whatever else you return...
+  });
 }
 
 function parseCsvCalendar(csvText) {
@@ -158,3 +120,4 @@ function splitCsvLine(line) {
 function isDate(s) {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
+
