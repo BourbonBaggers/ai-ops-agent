@@ -20,7 +20,7 @@ export function loadSettings(env) {
   };
 
   const mail = {
-    senderMailbox: str(env.SENDER_MAILBOX) || "", // leave empty if you want to force it later
+    senderMailbox: str(env.MAIL_SENDER_UPN) || "", // leave empty if you want to force it later
     replyTo: str(env.REPLY_TO) || ""
   };
 

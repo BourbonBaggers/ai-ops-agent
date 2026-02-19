@@ -9,6 +9,7 @@ import { handleWeekly } from "./routes/weekly.js";
 import { handleDev } from "./routes/dev.js";
 import { handleAdminSends } from "./routes/admin_sends.js";
 import { json } from "./lib/utils.js";
+import { handleDevEmail } from "./routes/dev_email.js";
 
 export async function handleRequest(request, env) {
   try {
@@ -25,6 +26,10 @@ export async function handleRequest(request, env) {
     // Dev routes (e.g., /dev/ping, /dev/run). This handler decides if it owns the route.
     const devResp = await handleDev(request, env);
     if (devResp) return devResp;
+
+    if (pathname .startsWith("/dev/email")){
+      return await handleDevEmail(request, env);
+    }
 
     // Health
     if (pathname === "/health") {
