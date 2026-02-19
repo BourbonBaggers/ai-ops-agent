@@ -23,13 +23,16 @@ export async function handleRequest(request, env) {
       typeof handleHealth
     );
 
-    // Dev routes (e.g., /dev/ping, /dev/run). This handler decides if it owns the route.
-    const devResp = await handleDev(request, env);
-    if (devResp) return devResp;
 
     if (pathname .startsWith("/dev/email")){
       return await handleDevEmail(request, env);
     }
+
+    // Dev routes (e.g., /dev/ping, /dev/run). This handler decides if it owns the route.
+    const devResp = await handleDev(request, env);
+    if (devResp) return devResp;
+
+   
 
     // Health
     if (pathname === "/health") {
