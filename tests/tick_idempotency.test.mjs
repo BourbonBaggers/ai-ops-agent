@@ -1,129 +1,14 @@
 // tests/tick_idempotency.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getJson, postJson } from "./_helpers.mjs";
+import {
+  getJson,
+  postJson,
+  findDateInWeekMatchingDow,
+  localYmdHhmmToUtcIso,
+} from "./_helpers.mjs";
 
 const WEEK_OF = "2026-02-16"; // Monday
-
-// --- helpers (test-side only) ---
-
-function ymdToDateUtc(ymd) {
-  // ymd is YYYY-MM-DD
-  return new Date(`${ymd}T00:00:00.000Z`);
-}
-
-function dateUtcToYmd(d) {
-  return d.toISOString().slice(0, 10);
-}
-
-function addDaysYmd(ymd, days) {
-  const d = ymdToDateUtc(ymd);
-  d.setUTCDate(d.getUTCDate() + days);
-  return dateUtcToYmd(d);
-}
-
-function normalizeDowToken(x) {
-  // accept "Fri", "FRIDAY", "friday", "5", etc. -> "fri"
-  if (x === null || x === undefined) return "";
-  const s = String(x).trim().toLowerCase();
-  if (!s) return "";
-  if (/^\d+$/.test(s)) return s; // numeric token, keep as-is
-  // "friday" -> "fri"
-  return s.slice(0, 3);
-}
-
-function weekdayShortInTz(ymd, tz) {
-  const dt = new Date(`${ymd}T12:00:00.000Z`); // noon UTC to avoid edge weirdness
-  const fmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
-  return fmt.format(dt); // e.g. "Fri"
-}
-
-function hhmmInTz(date, tz) {
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: tz,
-  });
-  return fmt.format(date); // "09:00"
-}
-
-function ymdInTz(date, tz) {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone: tz,
-  });
-  return fmt.format(date); // "2026-02-20"
-}
-
-function findDateInWeekMatchingDow(weekOfYmd, scheduleDow, tz) {
-  const want = normalizeDowToken(scheduleDow);
-
-  // If schedule is numeric (some systems do 0-6), we can map from Intl weekday:
-  const weekdayToNumSun0 = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-
-  for (let i = 0; i < 7; i++) {
-    const ymd = addDaysYmd(weekOfYmd, i);
-    const short = normalizeDowToken(weekdayShortInTz(ymd, tz)); // "fri"
-    if (want === short) return ymd;
-
-    // numeric fallback
-    if (/^\d+$/.test(want)) {
-      const gotNum = weekdayToNumSun0[short];
-      if (String(gotNum) === want) return ymd;
-    }
-  }
-
-  throw new Error(`Could not find a date in week_of=${weekOfYmd} matching schedule dow=${scheduleDow}`);
-}
-
-// Convert a desired local (ymd + hhmm in tz) to a UTC ISO string that,
-// when interpreted in tz, shows the intended ymd + hhmm.
-// We do a small iterative adjustment so we don't have to hardcode offsets.
-function localYmdHhmmToUtcIso(ymd, hhmm, tz) {
-  const [hh, mm] = hhmm.split(":").map((n) => parseInt(n, 10));
-
-  // start with a naive guess: same ymd/hhmm in UTC
-  let guess = new Date(`${ymd}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00.000Z`);
-
-  // iterate up to 12 times adjusting by the delta (in minutes) between desired and observed
-  for (let i = 0; i < 12; i++) {
-    const gotYmd = ymdInTz(guess, tz);
-    const gotHhmm = hhmmInTz(guess, tz);
-
-    if (gotYmd === ymd && gotHhmm === hhmm) return guess.toISOString();
-
-    // compute minute delta by brute forcing nearest +/- 24h window
-    // (simple and reliable given our tiny problem size)
-    let bestDeltaMin = null;
-    for (const deltaMin of [-720, -360, -180, -120, -60, -30, -15, -5, -1, 1, 5, 15, 30, 60, 120, 180, 360, 720]) {
-      const trial = new Date(guess.getTime() + deltaMin * 60_000);
-      if (ymdInTz(trial, tz) === ymd && hhmmInTz(trial, tz) === hhmm) {
-        return trial.toISOString();
-      }
-      // keep a "best effort" direction: if date matches, favor getting time closer
-      if (ymdInTz(trial, tz) === ymd) {
-        // compare lexicographically because HH:MM zero padded
-        const d = trial;
-        const t = hhmmInTz(d, tz);
-        const diff = Math.abs((parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(3, 5), 10)) - (hh * 60 + mm));
-        if (bestDeltaMin === null || diff < bestDeltaMin.diff) bestDeltaMin = { deltaMin, diff };
-      }
-    }
-
-    // fallback adjust: if date mismatched, shove by 6h toward same day; else use best time nudge
-    if (bestDeltaMin) {
-      guess = new Date(guess.getTime() + bestDeltaMin.deltaMin * 60_000);
-    } else {
-      // large nudge
-      guess = new Date(guess.getTime() + 6 * 60 * 60_000);
-    }
-  }
-
-  throw new Error(`Failed to compute UTC ISO for local ${ymd} ${hhmm} in tz=${tz}`);
-}
 
 async function tickAt(isoUtc) {
   const r = await postJson(`/jobs/tick?now=${encodeURIComponent(isoUtc)}`);
