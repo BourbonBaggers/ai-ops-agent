@@ -18,21 +18,27 @@ let to = q.get("to");
 if (week_of) {
   if (!isYmd(week_of)) throw badRequest("Query param 'week_of' must be YYYY-MM-DD");
   from = week_of;
-  to = addDays(week_of, 7); // or 6 if you mean inclusive end-date
+  to = addDays(week_of, 6); // Mon–Sun inclusive
 } else {
   if (!isYmd(from) || !isYmd(to)) {
     throw badRequest("Query params 'from' and 'to' must be YYYY-MM-DD");
   }
 }
 
-  // ... existing calendar query logic using from/to ...
+  const rows = await env.DB.prepare(`
+    SELECT id, date, category, title, notes
+    FROM calendar_items
+    WHERE date >= ? AND date <= ?
+    ORDER BY date ASC
+  `).bind(from, to).all();
 
   return json({
     status: "ok",
-    week_of: week_of ?? null, // <-- add this
+    week_of: week_of ?? null,
     from,
     to,
-    // ...whatever else you return...
+    count: rows.results.length,
+    items: rows.results,
   });
 }
 

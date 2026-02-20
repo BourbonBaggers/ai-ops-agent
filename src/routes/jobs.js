@@ -31,9 +31,9 @@ async function tick(request, env) {
 
   const now = getNowForTick(request, env);     // <-- key point
   const nowUtc = now.toISOString();
-  const nowLocal = nowInTzISO(tz);
+  const nowLocal = nowInTzISO(tz, now);
 
-  const week_of = getWeekOf(tz);
+  const week_of = getWeekOf(tz, now);
   const { dow, hhmm } = getPartsInTz(now, tz);
 
   const actions = [];
@@ -189,7 +189,7 @@ export async function sendStub(env, run, nowZ) {
     ? await env.DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(run.selected_candidate_id).first()
     : null;
 
-  if (!cand) throw new Error("No selected candidate found to create send record");
+  if (!cand) return false; // no candidates generated yet — skip silently
 
   const isDev = (env.ENVIRONMENT || "").toLowerCase() === "dev";
 

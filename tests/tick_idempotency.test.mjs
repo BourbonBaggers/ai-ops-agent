@@ -196,6 +196,11 @@ test("tick idempotency: generate stage does not duplicate candidates", async () 
   // first tick may generate (n1 >= n0), but second tick must not increase again
   assert.equal(n2, n1, `candidates duplicated on second generate tick: n1=${n1}, n2=${n2}`);
 
+  // IDs must be stable — same count with different IDs means silent delete+recreate
+  const ids1 = (mid.candidates ?? mid.items ?? []).map(c => c.id).sort();
+  const ids2 = (after.candidates ?? after.items ?? []).map(c => c.id).sort();
+  assert.deepEqual(ids2, ids1, "candidate IDs changed on second tick — silent delete+recreate detected");
+
   // sanity: second tick shouldn't claim "generate" action again (if you keep actions)
   if (Array.isArray(t2.actions)) {
     assert.ok(!t2.actions.includes("generate"), "second generate tick should not repeat generate action");
@@ -260,20 +265,68 @@ test("tick idempotency: send_stub stage does not duplicate sends", async () => {
   const sendNow = localYmdHhmmToUtcIso(sendDate, schedule.send.time, tz);
 
   await tickAt(sendNow);
- const weeklyRunId = await getWeeklyRunIdForWeek(WEEK_OF);
+  const weeklyRunId = await getWeeklyRunIdForWeek(WEEK_OF);
 
-    await tickAt(sendNow);
-    const s1 = await getSendsByWeeklyRunId(weeklyRunId);
-    assert.equal(s1.status, "ok");
-    const sends1 = s1.sends ?? s1.items ?? [];
-    assert.ok(sends1.length >= 1, "expected at least 1 send after first send tick");
-    const n1 = sends1.length;
+  await tickAt(sendNow);
+  const s1 = await getSendsByWeeklyRunId(weeklyRunId);
+  assert.equal(s1.status, "ok");
+  const sends1 = s1.sends ?? s1.items ?? [];
+  assert.ok(sends1.length >= 1, "expected at least 1 send after first send tick");
+  const n1 = sends1.length;
 
-    await tickAt(sendNow);
-    const s2 = await getSendsByWeeklyRunId(weeklyRunId);
-    const sends2 = s2.sends ?? s2.items ?? [];
-    const n2 = sends2.length;
+  await tickAt(sendNow);
+  const s2 = await getSendsByWeeklyRunId(weeklyRunId);
+  const sends2 = s2.sends ?? s2.items ?? [];
+  const n2 = sends2.length;
 
-    assert.equal(n2, n1, `send duplicated on second send tick: n1=${n1}, n2=${n2}`);
-    }
-);
+  assert.equal(n2, n1, `send duplicated on second send tick: n1=${n1}, n2=${n2}`);
+});
+
+test("tick state machine: send tick with no candidates skips silently (no 500)", async () => {
+  // Use a far-future week that no other test touches.
+  // "2026-06-01" is a Monday; "2026-06-03" (Wednesday) is safe to use as an off-schedule time.
+  const EMPTY_WEEK = "2026-06-01";
+  const OFF_SCHEDULE_DAY = "2026-06-03"; // Wednesday — never matches generate/lock/send defaults
+
+  const cfg = await getJson("/admin/config");
+  assert.equal(cfg.status, "ok");
+
+  const tz = cfg.tz ?? cfg.config?.timezone ?? cfg.config?.tz;
+  const schedule = cfg.schedule ?? cfg.config?.schedule;
+  assert.ok(tz, "config missing tz");
+  assert.ok(schedule?.send?.dow, "config missing schedule.send.dow");
+  assert.ok(schedule?.send?.time, "config missing schedule.send.time");
+
+  // Tick at an off-schedule time (Wednesday noon) to create the weekly run WITHOUT
+  // triggering generate, lock, or send. This leaves a pending run with 0 candidates.
+  // Safe to re-run: ensureWeeklyRun is idempotent; no candidates accumulate.
+  const offNow = localYmdHhmmToUtcIso(OFF_SCHEDULE_DAY, "12:34", tz);
+  await tickAt(offNow);
+
+  // Verify 0 candidates exist for this week (the off-schedule tick must not generate).
+  const candidates = await getCandidates(EMPTY_WEEK);
+  assert.equal(candidates.status, "ok");
+  const nCandidates = (candidates.candidates ?? candidates.items ?? []).length;
+  assert.equal(nCandidates, 0, "off-schedule tick must not generate candidates");
+
+  // Tick at send time with no candidates — must return ok, not a 500.
+  const sendDate = findDateInWeekMatchingDow(EMPTY_WEEK, schedule.send.dow, tz);
+  const sendNow = localYmdHhmmToUtcIso(sendDate, schedule.send.time, tz);
+  const result = await tickAt(sendNow);
+  assert.equal(result.status, "ok", "tick should return ok even with no candidates");
+
+  // send_stub must NOT appear in actions (it should have skipped silently).
+  if (Array.isArray(result.actions)) {
+    assert.ok(
+      !result.actions.includes("send_stub"),
+      `send_stub should not fire when there are no candidates (actions=${JSON.stringify(result.actions)})`
+    );
+  }
+
+  // No sends should have been created for this week.
+  const weeklyRunId = await getWeeklyRunIdForWeek(EMPTY_WEEK);
+  const s = await getSendsByWeeklyRunId(weeklyRunId);
+  assert.equal(s.status, "ok");
+  const sends = s.sends ?? s.items ?? [];
+  assert.equal(sends.length, 0, "no sends should exist for a week with no candidates");
+});

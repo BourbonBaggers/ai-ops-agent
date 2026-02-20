@@ -17,7 +17,7 @@ export function strOrNull(v) {
 
 export function normalizeEmail(e) {
   const s = str(e).toLowerCase();
-  return s.includes("@") ? s : "";
+  return /^[^@\s]+@[^@\s]+$/.test(s) ? s : "";
 }
 
 export function clampInt(v, min, max, dflt) {
