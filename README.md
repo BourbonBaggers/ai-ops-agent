@@ -8,7 +8,7 @@ A governance-first, serverless AI operator that:
 - preserves full send history,
 - runs on Cloudflare Workers with strict cost controls.
 
-Reference implementation: “Courtney” (AI employee) for Bourbon Baggers.
+Reference implementation: “Courtney” (AI agent) for Bourbon Baggers.
 
 # Documentation
 
