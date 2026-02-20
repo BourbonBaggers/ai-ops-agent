@@ -8,6 +8,7 @@ import { handleCandidates } from "./routes/candidates.js";
 import { handleWeekly } from "./routes/weekly.js";
 import { handleDev } from "./routes/dev.js";
 import { handleAdminSends } from "./routes/admin_sends.js";
+import { handleAdminPreview } from "./routes/admin_preview.js";
 import { json } from "./lib/utils.js";
 import { handleDevEmail } from "./routes/dev_email.js";
 
@@ -42,6 +43,10 @@ export async function handleRequest(request, env) {
     // Admin
     if (pathname.startsWith("/admin/sends")) {
       return await handleAdminSends(request, env);
+    }
+
+    if (pathname.startsWith("/admin/preview")) {
+      return await handleAdminPreview(request, env);
     }
 
     if (pathname.startsWith("/admin/contacts")) {

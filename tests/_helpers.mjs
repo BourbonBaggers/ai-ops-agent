@@ -96,6 +96,95 @@ export async function postJson(path, body, arg3, arg4) {
   assertStatus(r, expectedStatus);
   return assertJsonBody(r);
 }
+// ---------------------------------------------------------------------------
+// Schedule / tick helpers — shared by idempotency and preview tests
+// ---------------------------------------------------------------------------
+
+function _ymdToDateUtc(ymd) {
+  return new Date(`${ymd}T00:00:00.000Z`);
+}
+
+function _addDaysYmd(ymd, days) {
+  const d = _ymdToDateUtc(ymd);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function _normalizeDowToken(x) {
+  if (x === null || x === undefined) return "";
+  const s = String(x).trim().toLowerCase();
+  if (!s) return "";
+  if (/^\d+$/.test(s)) return s;
+  return s.slice(0, 3);
+}
+
+function _weekdayShortInTz(ymd, tz) {
+  const dt = new Date(`${ymd}T12:00:00.000Z`);
+  return new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz }).format(dt);
+}
+
+function _hhmmInTz(date, tz) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz,
+  }).format(date);
+}
+
+function _ymdInTz(date, tz) {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric", month: "2-digit", day: "2-digit", timeZone: tz,
+  }).format(date);
+}
+
+/**
+ * Given a week_of (YYYY-MM-DD Monday) and a schedule DOW token (e.g. "fri", "FRIDAY", "5"),
+ * return the YYYY-MM-DD of the day in that week matching the DOW, in the given tz.
+ */
+export function findDateInWeekMatchingDow(weekOfYmd, scheduleDow, tz) {
+  const want = _normalizeDowToken(scheduleDow);
+  const weekdayToNumSun0 = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+  for (let i = 0; i < 7; i++) {
+    const ymd = _addDaysYmd(weekOfYmd, i);
+    const short = _normalizeDowToken(_weekdayShortInTz(ymd, tz));
+    if (want === short) return ymd;
+    if (/^\d+$/.test(want) && String(weekdayToNumSun0[short]) === want) return ymd;
+  }
+
+  throw new Error(`Could not find a date in week_of=${weekOfYmd} matching schedule dow=${scheduleDow}`);
+}
+
+/**
+ * Convert a desired local time (ymd + hhmm in tz) to a UTC ISO string.
+ * Iteratively adjusts to handle DST without requiring hardcoded offsets.
+ */
+export function localYmdHhmmToUtcIso(ymd, hhmm, tz) {
+  const [hh, mm] = hhmm.split(":").map(n => parseInt(n, 10));
+  let guess = new Date(`${ymd}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00.000Z`);
+
+  for (let i = 0; i < 12; i++) {
+    if (_ymdInTz(guess, tz) === ymd && _hhmmInTz(guess, tz) === hhmm) return guess.toISOString();
+
+    let bestDeltaMin = null;
+    for (const deltaMin of [-720, -360, -180, -120, -60, -30, -15, -5, -1, 1, 5, 15, 30, 60, 120, 180, 360, 720]) {
+      const trial = new Date(guess.getTime() + deltaMin * 60_000);
+      if (_ymdInTz(trial, tz) === ymd && _hhmmInTz(trial, tz) === hhmm) return trial.toISOString();
+      if (_ymdInTz(trial, tz) === ymd) {
+        const t = _hhmmInTz(trial, tz);
+        const diff = Math.abs((parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(3, 5), 10)) - (hh * 60 + mm));
+        if (bestDeltaMin === null || diff < bestDeltaMin.diff) bestDeltaMin = { deltaMin, diff };
+      }
+    }
+
+    guess = bestDeltaMin
+      ? new Date(guess.getTime() + bestDeltaMin.deltaMin * 60_000)
+      : new Date(guess.getTime() + 6 * 60 * 60_000);
+  }
+
+  throw new Error(`Failed to compute UTC ISO for local ${ymd} ${hhmm} in tz=${tz}`);
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Convenience for endpoints that accept query strings.
  */
