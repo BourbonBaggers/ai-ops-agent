@@ -1,4 +1,5 @@
-import { json, normalizePath } from "../lib/utils.js";
+import { json, normalizePath, safeJson } from "../lib/utils.js";
+import { isYmd } from "../lib/time.js";
 
 export async function handleWeekly(request, env) {
   const url = new URL(request.url);
@@ -12,7 +13,7 @@ export async function handleWeekly(request, env) {
   let week_of = url.searchParams.get("week_of");
 
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(week_of)) {
+  if (!isYmd(week_of)) {
     return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
   }
 
@@ -51,9 +52,5 @@ export async function handleWeekly(request, env) {
     })),
     selected
   });
-}
-
-function safeJson(s, fallback) {
-  try { return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 }
 

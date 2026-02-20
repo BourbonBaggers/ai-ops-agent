@@ -1,4 +1,6 @@
 // src/lib/settings.js
+import { str } from "./utils.js";
+
 const VALID_DOW = ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"];
 
 export function loadSettings(env) {
@@ -49,10 +51,6 @@ function validate(cfg) {
 
   // Mailbox fields are allowed to be empty for now (since you're still stubbing send),
   // but we keep them here so wiring later is trivial.
-}
-
-function str(v) {
-  return (v ?? "").toString().trim();
 }
 
 function upper(v) {

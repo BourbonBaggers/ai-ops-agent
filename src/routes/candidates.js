@@ -1,5 +1,5 @@
-import { json, normalizePath } from "../lib/utils.js";
-import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
+import { json, normalizePath, safeJson } from "../lib/utils.js";
+import { nowUtcIso, isYmd, utcDateStr } from "../lib/time.js";
 import { MockProvider } from "../providers/mockProvider.js";
 
 // Public exports so jobs.js can call generation without HTTP
@@ -126,7 +126,7 @@ export async function handleCandidates(request, env) {
   // GET /admin/candidates?week_of=YYYY-MM-DD
   if (path === "/admin/candidates" && method === "GET") {
     const week_of = url.searchParams.get("week_of");
-    if (!isDate(week_of)) return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
+    if (!isYmd(week_of)) return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
 
     const run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`)
       .bind(week_of)
@@ -158,7 +158,7 @@ export async function handleCandidates(request, env) {
     const week_of = url.searchParams.get("week_of");
     const force = url.searchParams.get("force") === "1";
 
-    if (!isDate(week_of)) return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
+    if (!isYmd(week_of)) return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
 
     const result = await generateCandidatesForWeek(env, week_of, { force });
 
@@ -176,7 +176,7 @@ export async function handleCandidates(request, env) {
     const rank = Number(body.rank);
     const notes = typeof body.notes === "string" ? body.notes : null;
 
-    if (!isDate(week_of)) return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
+    if (!isYmd(week_of)) return json({ status: "error", message: "week_of must be YYYY-MM-DD" }, 400);
     if (![1, 2, 3].includes(rank)) return json({ status: "error", message: "rank must be 1, 2, or 3" }, 400);
 
     const run = await ensureWeeklyRun(env, week_of);
@@ -230,14 +230,6 @@ function hydrateCandidateRow(r) {
   };
 }
 
-function safeJson(s, fallback) {
-  try { return s ? JSON.parse(s) : fallback; } catch { return fallback; }
-}
-
-function isDate(s) {
-  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 async function ensureWeeklyRun(env, week_of) {
   let run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`)
     .bind(week_of)
@@ -261,8 +253,8 @@ async function getCalendarHorizon(env, days) {
   const start = new Date();
   const end = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-  const from = isoDate(start);
-  const to = isoDate(end);
+  const from = utcDateStr(start);
+  const to = utcDateStr(end);
 
   const rows = await env.DB.prepare(`
     SELECT id, date, category, title, notes
@@ -274,9 +266,3 @@ async function getCalendarHorizon(env, days) {
   return rows.results;
 }
 
-function isoDate(d) {
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}

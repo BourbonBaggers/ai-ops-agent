@@ -259,23 +259,3 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
-async function getTableColumns(env, tableName) {
-  const res = await env.DB.prepare(`PRAGMA table_info(${tableName});`).all();
-  // rows contain: cid, name, type, notnull, dflt_value, pk
-  return new Set(res.results.map(r => r.name));
-}
-
-async function insertRowFlexible(env, tableName, dataObj) {
-  const cols = await getTableColumns(env, tableName);
-
-  const keys = Object.keys(dataObj).filter(k => cols.has(k));
-  if (keys.length === 0) {
-    throw new Error(`No matching columns to insert into ${tableName}`);
-  }
-
-  const placeholders = keys.map(() => "?").join(", ");
-  const sql = `INSERT INTO ${tableName} (${keys.join(", ")}) VALUES (${placeholders})`;
-  const values = keys.map(k => dataObj[k]);
-
-  await env.DB.prepare(sql).bind(...values).run();
-}
