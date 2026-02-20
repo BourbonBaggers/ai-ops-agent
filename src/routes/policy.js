@@ -1,5 +1,5 @@
-import { json, normalizePath, requireJsonBody } from "../lib/utils.js";
-import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
+import { json, normalizePath, requireJsonBody, strOrNull, clampInt } from "../lib/utils.js";
+import { nowUtcIso } from "../lib/time.js";
 
 export async function handlePolicy(request, env) {
   const url = new URL(request.url);
@@ -47,8 +47,7 @@ async function getActivePolicy(env) {
 
 async function createPolicyVersion(request, env) {
   // Accept JSON: { title, body_markdown }
-  const { ok, body } = await requireJsonBody(request);
-  if (!ok) return json({ status: "error", message: "JSON body required" }, 400);
+  const body = await requireJsonBody(request);
 
   const title = strOrNull(body.title) || "Marketing Standards Policy";
   const body_markdown = strOrNull(body.body_markdown);

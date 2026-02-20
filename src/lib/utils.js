@@ -73,4 +73,6 @@ export function httpError(status, message) {
   return err;
 }
 
-
+export function safeJson(s, fallback) {
+  try { return s ? JSON.parse(s) : fallback; } catch { return fallback; }
+}

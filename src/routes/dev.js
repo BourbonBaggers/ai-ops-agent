@@ -1,5 +1,5 @@
 import { json, normalizePath } from "../lib/utils.js";
-import { nowUtcIso, nowInTzISO, getWeekOf,  } from "../lib/time.js";
+import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
 import { loadSettings } from "../lib/settings.js";
 
 import { ensureWeeklyRun, lockWeeklyRun, sendStub } from "./jobs.js";

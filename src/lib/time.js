@@ -87,3 +87,13 @@ export function addDays(ymd, days) {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+// Validate YYYY-MM-DD string
+export function isYmd(s) {
+  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+// Format a Date to YYYY-MM-DD using UTC fields
+export function utcDateStr(d) {
+  return asDate(d).toISOString().slice(0, 10);
+}

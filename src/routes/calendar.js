@@ -1,9 +1,5 @@
 import { json, normalizePath, badRequest } from "../lib/utils.js";
-import { getWeekOf, addDays } from "../lib/time.js";
-
-function isYmd(s) {
-  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
+import { addDays, isYmd } from "../lib/time.js";
 
 
 export async function handleCalendar(request, env) {
@@ -38,86 +34,5 @@ if (week_of) {
     to,
     // ...whatever else you return...
   });
-}
-
-function parseCsvCalendar(csvText) {
-  const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
-  const errors = [];
-  if (lines.length < 2) return { items: [], errors: ["CSV must include header and at least one row"] };
-
-  const header = splitCsvLine(lines[0]).map(h => h.trim().toLowerCase());
-  const required = ["date", "category", "title"];
-  for (const r of required) {
-    if (!header.includes(r)) errors.push(`Missing required column: ${r}`);
-  }
-  if (errors.length) return { items: [], errors };
-
-  const idx = {
-    date: header.indexOf("date"),
-    category: header.indexOf("category"),
-    title: header.indexOf("title"),
-    notes: header.indexOf("notes"),
-  };
-
-  const items = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
-    const rowNum = i + 1;
-
-    const date = (cols[idx.date] ?? "").trim();
-    const category = (cols[idx.category] ?? "").trim();
-    const title = (cols[idx.title] ?? "").trim();
-    const notes = idx.notes >= 0 ? (cols[idx.notes] ?? "").trim() : "";
-
-    if (!isDate(date)) errors.push(`Row ${rowNum}: invalid date '${date}' (expected YYYY-MM-DD)`);
-    if (!category) errors.push(`Row ${rowNum}: category is required`);
-    if (!title) errors.push(`Row ${rowNum}: title is required`);
-
-    items.push({
-      date,
-      category,
-      title,
-      notes: notes || null
-    });
-  }
-
-  return { items, errors };
-}
-
-// Minimal CSV splitting with quotes support
-function splitCsvLine(line) {
-  const out = [];
-  let cur = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-
-    if (ch === '"') {
-      // double-quote escape
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (ch === "," && !inQuotes) {
-      out.push(cur);
-      cur = "";
-      continue;
-    }
-
-    cur += ch;
-  }
-
-  out.push(cur);
-  return out;
-}
-
-function isDate(s) {
-  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
