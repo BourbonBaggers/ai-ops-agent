@@ -4,37 +4,44 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleAssets } from "../src/routes/assets.js";
 
-const BASE = "https://assets.example.com/";
-const PREFIX = "assets/Product Pictures/Sized for Websites/";
+const BASE = "https://assets.boozebaggers.com/";
+const PREFIX = "Product Pictures/Sized for Websites/";
 
 // ---------------------------------------------------------------------------
-// Test helpers
+// Mock R2 binding
+//
+// The handler makes three categories of list() calls:
+//   1. list({ limit: 10 })            — root sanity check (no prefix)
+//   2. list({ prefix, limit: 10 })    — prefix sanity check
+//   3. list({ prefix [, cursor] })    — full pagination loop (no limit param)
+//
+// The mock distinguishes (1)/(2) from (3) by the presence of `limit`.
+// Pagination state is tracked via the cursor string "page-N".
 // ---------------------------------------------------------------------------
 
-function makeGet() {
-  return new Request("http://localhost/admin/assets");
-}
-
-function makePost() {
-  return new Request("http://localhost/admin/assets", { method: "POST" });
-}
-
-/**
- * Minimal R2 mock.
- * pages is an array of arrays-of-keys; each inner array is one page.
- * The mock returns them in order, setting truncated=true until the last page.
- */
 function mockR2(pages) {
-  let call = 0;
+  const allKeys = pages.flat();
+
   return {
-    async list({ prefix } = {}) {
-      const pageKeys = pages[call] ?? [];
-      call++;
-      const objects = pageKeys
-        .filter(k => k.startsWith(prefix ?? ""))
-        .map(k => ({ key: k }));
-      const truncated = call < pages.length;
-      return { objects, truncated, cursor: truncated ? `cursor-${call}` : undefined };
+    async list({ prefix, cursor, limit } = {}) {
+      // Pre-check calls have limit set; return up to limit items without paging.
+      if (limit !== undefined) {
+        const matching = allKeys
+          .filter(k => !prefix || k.startsWith(prefix))
+          .slice(0, limit);
+        return { objects: matching.map(k => ({ key: k })), truncated: false };
+      }
+
+      // Pagination calls: cursor encodes the page index ("page-N"), absent = page 0.
+      const pageIdx = cursor ? parseInt(cursor.split("-")[1], 10) : 0;
+      const pageKeys = (pages[pageIdx] ?? []).filter(k => !prefix || k.startsWith(prefix));
+      const nextIdx = pageIdx + 1;
+      const truncated = nextIdx < pages.length;
+      return {
+        objects: pageKeys.map(k => ({ key: k })),
+        truncated,
+        cursor: truncated ? `page-${nextIdx}` : undefined,
+      };
     },
   };
 }
@@ -46,6 +53,14 @@ function makeEnv(pages, { baseUrl = BASE, omitR2 = false, omitBase = false } = {
   };
 }
 
+function makeGet(path = "/admin/assets") {
+  return new Request(`http://localhost${path}`);
+}
+
+function makePost() {
+  return new Request("http://localhost/admin/assets", { method: "POST" });
+}
+
 async function call(req, env) {
   const res = await handleAssets(req, env);
   const body = await res.json();
@@ -53,27 +68,24 @@ async function call(req, env) {
 }
 
 // ---------------------------------------------------------------------------
-// Fixture data
+// Fixture data — keys use the updated prefix (no leading "assets/")
 // ---------------------------------------------------------------------------
 
-// Keys that SHOULD appear in results (valid path + valid extension)
 const VALID = [
   `${PREFIX}Widget A/front.jpg`,
-  `${PREFIX}Widget A/back.JPG`,          // uppercase ext — must be included
+  `${PREFIX}Widget A/back.JPG`,     // uppercase ext — must be included
   `${PREFIX}Widget A/side.jpeg`,
   `${PREFIX}Widget B/hero.png`,
   `${PREFIX}Widget B/logo.webp`,
   `${PREFIX}Widget C/spin.gif`,
 ];
 
-// Keys that should be EXCLUDED
 const INVALID = [
-  `${PREFIX}Widget A/spec-sheet.pdf`,    // wrong type
-  `${PREFIX}Widget B/readme.txt`,        // wrong type
-  `${PREFIX}Widget B/archive.zip`,       // wrong type
-  `${PREFIX}root-file.png`,              // no product subdirectory
-  `${PREFIX}Widget A/`,                  // directory marker (trailing slash)
-  `assets/Other Folder/Widget X/sneaky.png`, // outside allowed prefix
+  `${PREFIX}Widget A/spec-sheet.pdf`,   // wrong type
+  `${PREFIX}Widget B/readme.txt`,       // wrong type
+  `${PREFIX}root-file.png`,             // no product subdirectory
+  `${PREFIX}Widget A/`,                 // directory marker
+  `Other Folder/Widget X/sneaky.png`,   // outside allowed prefix
 ];
 
 const ALL_KEYS = [...VALID, ...INVALID];
@@ -147,15 +159,12 @@ test("assets: groups results by product name", async () => {
   const { body } = await call(makeGet(), makeEnv([VALID]));
   assert.equal(body.status, "ok");
 
-  // Widget A has 3 valid image files in fixture
   assert.ok(body.grouped["Widget A"], "Widget A group missing");
   assert.equal(body.grouped["Widget A"].length, 3);
 
-  // Widget B has 2
   assert.ok(body.grouped["Widget B"], "Widget B group missing");
   assert.equal(body.grouped["Widget B"].length, 2);
 
-  // Widget C has 1
   assert.ok(body.grouped["Widget C"], "Widget C group missing");
   assert.equal(body.grouped["Widget C"].length, 1);
 });
@@ -170,7 +179,6 @@ test("assets: flat list contains all valid items with productName, key, url", as
     assert.ok(item.url, "url missing");
   }
 
-  // Spot-check grouping in flat list
   const widgetAItems = body.flat.filter(i => i.productName === "Widget A");
   assert.equal(widgetAItems.length, 3);
 });
@@ -193,7 +201,6 @@ test("assets: URLs are built as ASSET_BASE_URL + encodeURI(key)", async () => {
   const expectedUrl = BASE + encodeURI(keyWithSpaces);
   assert.equal(body.flat[0].url, expectedUrl);
 
-  // Spaces encoded as %20, slashes preserved as /
   assert.ok(body.flat[0].url.includes("%20"), "spaces must be percent-encoded");
   assert.ok(!body.flat[0].url.includes(" "), "raw spaces must not appear in URL");
 });
@@ -213,7 +220,6 @@ test("assets: normalises ASSET_BASE_URL with or without trailing slash", async (
 // ---------------------------------------------------------------------------
 
 test("assets: output is sorted deterministically by key", async () => {
-  // Provide keys in reverse order; expect them sorted ascending in output.
   const keys = [...VALID].reverse();
   const { body } = await call(makeGet(), makeEnv([keys]));
 
@@ -222,7 +228,7 @@ test("assets: output is sorted deterministically by key", async () => {
   assert.deepEqual(flatKeys, sortedKeys, "flat list must be sorted by key");
 });
 
-test("assets: grouped values are also sorted by key within each product", async () => {
+test("assets: grouped values are sorted by key within each product", async () => {
   const { body } = await call(makeGet(), makeEnv([VALID]));
 
   for (const [product, items] of Object.entries(body.grouped)) {
@@ -237,7 +243,6 @@ test("assets: grouped values are also sorted by key within each product", async 
 // ---------------------------------------------------------------------------
 
 test("assets: pages through multiple R2 list() responses", async () => {
-  // Split valid keys across 3 pages to verify cursor pagination is followed.
   const page1 = VALID.slice(0, 2);
   const page2 = VALID.slice(2, 4);
   const page3 = VALID.slice(4);
@@ -254,4 +259,31 @@ test("assets: handles empty bucket gracefully", async () => {
   assert.equal(body.count, 0);
   assert.deepEqual(body.flat, []);
   assert.deepEqual(body.grouped, {});
+});
+
+// ---------------------------------------------------------------------------
+// Debug mode
+// ---------------------------------------------------------------------------
+
+test("assets: ?debug=1 returns debug response shape", async () => {
+  const { status, body } = await call(makeGet("/admin/assets?debug=1"), makeEnv([VALID]));
+  assert.equal(status, 200);
+  assert.equal(body.status, "debug");
+  assert.ok(Array.isArray(body.steps) && body.steps.length > 0, "steps array must be present");
+  assert.ok("allowedPrefixRaw" in body, "allowedPrefixRaw missing from debug response");
+  assert.ok("allowedPrefixNormalized" in body, "allowedPrefixNormalized missing from debug response");
+  assert.ok(Array.isArray(body.rootSample), "rootSample must be present");
+  assert.ok(Array.isArray(body.prefixSample), "prefixSample must be present");
+  assert.equal(typeof body.count, "number", "count must be present");
+  assert.ok(Array.isArray(body.flat), "flat (capped at 25) must be present");
+  assert.ok(Array.isArray(body.groupedKeys), "groupedKeys must be present");
+});
+
+test("assets: normal request (no debug) returns ok status without debug fields", async () => {
+  const { body } = await call(makeGet(), makeEnv([VALID]));
+  assert.equal(body.status, "ok");
+  assert.equal(body.steps, undefined, "steps must not appear in non-debug response");
+  assert.equal(body.allowedPrefixRaw, undefined, "allowedPrefixRaw must not appear in non-debug response");
+  assert.ok(Array.isArray(body.flat), "flat must be present");
+  assert.ok(typeof body.grouped === "object", "grouped must be present");
 });

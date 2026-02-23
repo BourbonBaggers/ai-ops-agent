@@ -1,7 +1,7 @@
 // src/routes/assets.js — read-only listing of valid image assets from R2
 import { json } from "../lib/utils.js";
 
-const ALLOWED_PREFIX = "assets/Product Pictures/Sized for Websites/";
+const ALLOWED_PREFIX = "Product Pictures/Sized for Websites/";
 const ALLOWED_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
 
 function extOf(key) {
@@ -26,66 +26,114 @@ function isValidImageKey(key) {
 }
 
 export async function handleAssets(request, env) {
+  const url = new URL(request.url);
+  const debug = url.searchParams.get("debug") === "1";
+
+  const dbg = { status: debug ? "debug" : "ok", steps: [] };
+  const log = (step, data = {}) => {
+    const entry = { step, ...data };
+    dbg.steps.push(entry);
+    if (debug) console.log("[assets]", JSON.stringify(entry));
+  };
+
   if (request.method !== "GET") {
     return json({ status: "error", message: "Method not allowed" }, 405);
   }
 
-  if (!env.ASSETS_R2) {
-    return json({ status: "error", message: "ASSETS_R2 binding not configured" }, 503);
-  }
+  log("env_presence", {
+    has_ASSETS_R2: !!env.ASSETS_R2,
+    has_ASSET_BASE_URL: !!env.ASSET_BASE_URL,
+    ASSET_BASE_URL: env.ASSET_BASE_URL ? "(set)" : "(missing)",
+  });
 
-  if (!env.ASSET_BASE_URL) {
-    return json({ status: "error", message: "ASSET_BASE_URL env var not set" }, 503);
-  }
+  if (!env.ASSETS_R2) return json({ status: "error", message: "ASSETS_R2 binding not configured" }, 503);
+  if (!env.ASSET_BASE_URL) return json({ status: "error", message: "ASSET_BASE_URL env var not set" }, 503);
 
-  // Normalise: ensure exactly one trailing slash so concatenation is unambiguous.
-  const baseUrl = env.ASSET_BASE_URL.endsWith("/")
-    ? env.ASSET_BASE_URL
-    : env.ASSET_BASE_URL + "/";
+  const baseUrl = env.ASSET_BASE_URL.endsWith("/") ? env.ASSET_BASE_URL : env.ASSET_BASE_URL + "/";
+  log("baseUrl", { baseUrl });
 
-  // Page through all R2 objects under the allowed prefix.
-  // R2 list() returns at most 1 000 objects per call; cursor pagination covers larger buckets.
+  // IMPORTANT: show prefix
+  const prefixRaw = ALLOWED_PREFIX;
+  const prefix = normalizePrefix(prefixRaw); // you can implement normalizePrefix() or inline it
+  log("prefix", { prefixRaw, prefix });
+
+  // Root list (no prefix) sanity check
+  const root = await env.ASSETS_R2.list({ limit: 10 });
+  log("r2_root_list", {
+    objectsCount: root.objects?.length ?? 0,
+    sampleKeys: (root.objects ?? []).slice(0, 10).map(o => o.key),
+    truncated: !!root.truncated,
+    delimitedPrefixes: root.delimitedPrefixes ?? [],
+  });
+
+  // Prefix list sanity check
+  const pref = await env.ASSETS_R2.list({ prefix, limit: 10 });
+  log("r2_prefix_list", {
+    objectsCount: pref.objects?.length ?? 0,
+    sampleKeys: (pref.objects ?? []).slice(0, 10).map(o => o.key),
+    truncated: !!pref.truncated,
+    delimitedPrefixes: pref.delimitedPrefixes ?? [],
+  });
+
+  // Full pagination under prefix
   const validObjects = [];
   let cursor;
+
   do {
-    const page = await env.ASSETS_R2.list({
-      prefix: ALLOWED_PREFIX,
-      ...(cursor ? { cursor } : {}),
+    const page = await env.ASSETS_R2.list({ prefix, ...(cursor ? { cursor } : {}) });
+    log("r2_page", {
+      cursor_in: cursor ?? null,
+      returned: page.objects?.length ?? 0,
+      truncated: !!page.truncated,
+      cursor_out: page.cursor ?? null,
     });
 
     for (const obj of page.objects ?? []) {
-      if (isValidImageKey(obj.key)) {
-        validObjects.push(obj);
-      }
+      if (isValidImageKey(obj.key)) validObjects.push(obj);
     }
 
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
 
-  // Sort keys for stable, deterministic output regardless of R2 traversal order.
   validObjects.sort((a, b) => a.key.localeCompare(b.key));
 
-  // Build grouped and flat outputs.
   const grouped = {};
   const flat = [];
 
   for (const obj of validObjects) {
     const productName = productNameOf(obj.key);
-    // url spec: ASSET_BASE_URL + encodeURI(key)
-    // encodeURI preserves "/" so path structure is intact; spaces become %20.
-    const url = baseUrl + encodeURI(obj.key);
-    const item = { key: obj.key, url };
+    const urlOut = baseUrl + encodeURI(obj.key);
+    const item = { key: obj.key, url: urlOut };
 
     if (!grouped[productName]) grouped[productName] = [];
     grouped[productName].push(item);
-
-    flat.push({ productName, key: obj.key, url });
+    flat.push({ productName, key: obj.key, url: urlOut });
   }
 
-  return json({
-    status: "ok",
+  log("final", {
     count: flat.length,
-    grouped,
-    flat,
+    firstUrls: flat.slice(0, 5),
   });
+
+  if (debug) {
+    return json({
+      ...dbg,
+      allowedPrefixRaw: prefixRaw,
+      allowedPrefixNormalized: prefix,
+      rootSample: (root.objects ?? []).slice(0, 10).map(o => o.key),
+      prefixSample: (pref.objects ?? []).slice(0, 10).map(o => o.key),
+      count: flat.length,
+      flat: flat.slice(0, 25), // don’t dump 8GB worth of keys accidentally
+      groupedKeys: Object.keys(grouped),
+    });
+  }
+
+  return json({ status: "ok", count: flat.length, grouped, flat });
+}
+
+function normalizePrefix(p) {
+  if (!p) return "";
+  // R2 keys are literal. Do NOT URL-encode the prefix.
+  // Ensure it ends with a slash if you mean “folder”.
+  return p.endsWith("/") ? p : p + "/";
 }
