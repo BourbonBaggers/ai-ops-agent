@@ -8,7 +8,8 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --env-file=.dev.vars --test --test-concurrency=1"
+    "test": "node --env-file=.dev.vars --test --test-concurrency=1",
+    "preview:openai": "node --env-file=.dev.vars scripts/openai_preview.mjs"
   },
   "repository": {
     "type": "git",
