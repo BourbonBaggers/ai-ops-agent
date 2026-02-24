@@ -89,23 +89,17 @@ export class OpenAIProvider {
       ? allowlistedItems.map((item) => `- ${item.url}`).join("\n")
       : "- (none)";
 
-    const userPrompt = [
-      "Follow the policy exactly and return JSON only.",
-      "Return this exact top-level schema:",
-      '{"candidates":[{"funnel_stage":"top|mid|bottom","subject":"...","preview":"...","body":"...","cta":"...","image_url":"..."|null,"variation_hint":"..."|null}]}',
-      "Hard constraints:",
-      "- Exactly 3 candidates.",
-      "- Plain-text body.",
-      "- No markdown fences, no explanation text.",
-      "",
-      `variation_hint: ${variationHint ?? "null"}`,
-      "",
-      "Approved image URL allowlist:",
-      allowlistText,
-      "",
-      "Policy:",
-      policy,
-    ].join("\n");
+  const userPrompt = [
+    "Follow the policy exactly and return JSON only.",
+    "",
+    `variation_hint: ${variationHint ?? "null"}`,
+    "",
+    "Approved image URL allowlist:",
+    allowlistText,
+    "",
+    "Policy:",
+    policy,
+  ].join("\n");
 
     const res = await this.fetchImpl(this.openAiUrl, {
       method: "POST",
@@ -167,7 +161,14 @@ function normalizeCandidate(candidate, idx, allowlistedUrls) {
   const funnel_stage = normalizeFunnelStage(candidate.funnel_stage);
   const subject = mustString(candidate.subject, `Candidate ${idx + 1} subject`);
   const preview = mustString(candidate.preview, `Candidate ${idx + 1} preview`);
-  const body = mustString(candidate.body, `Candidate ${idx + 1} body`);
+  const body_html = mustString(
+    candidate.body_html ?? candidate.bodyHtml ?? candidate.body,
+    `Candidate ${idx + 1} body_html`
+  );
+  const body_text = mustString(
+    candidate.body_text ?? candidate.bodyText ?? candidate.body,
+    `Candidate ${idx + 1} body_text`
+  );
   const cta = mustString(candidate.cta, `Candidate ${idx + 1} cta`);
 
   const requestedImageUrl = toNullableString(candidate.image_url);
@@ -180,12 +181,14 @@ function normalizeCandidate(candidate, idx, allowlistedUrls) {
     funnel_stage,
     subject,
     preview,
-    body,
+    body_html,
+    body_text,
+    body: body_text,
     cta,
     image_url,
     variation_hint,
     preview_text: preview,
-    body_markdown: body,
+    body_markdown: body_text,
     image_refs: image_url ? [image_url] : [],
     self_check: {},
   };

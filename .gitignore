@@ -150,3 +150,5 @@ wrangler.toml
 seeds/dev_seed.sql
 docs/policy.md
 docs/calendar.csv
+docs/template.md
+docs/template.html
