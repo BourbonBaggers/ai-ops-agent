@@ -10,6 +10,7 @@ import { handleDev } from "./routes/dev.js";
 import { handleAdminSends } from "./routes/admin_sends.js";
 import { handleAdminPreview } from "./routes/admin_preview.js";
 import { handleAssets } from "./routes/assets.js";
+import { handleEmailImages } from "./routes/email_images.js";
 import { json } from "./lib/utils.js";
 import { handleDevEmail } from "./routes/dev_email.js";
 
@@ -52,6 +53,10 @@ export async function handleRequest(request, env) {
 
     if (pathname.startsWith("/admin/assets")) {
       return await handleAssets(request, env);
+    }
+
+    if (pathname.startsWith("/admin/email_images")) {
+      return await handleEmailImages(request, env);
     }
 
     if (pathname.startsWith("/admin/contacts")) {

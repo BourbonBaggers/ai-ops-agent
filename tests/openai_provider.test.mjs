@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { OpenAIProvider } from "../src/providers/openaiProvider.js";
 
-test("openai provider parses 3 candidates and nulls disallowed image_url", async () => {
+test("openai provider loads image catalog from D1 and nulls disallowed image_url", async () => {
   const allowlistedUrl = "https://assets.example.com/Product Pictures/Sized for Websites/A/one.jpg";
   const invalidUrl = "https://evil.example.com/not-allowed.jpg";
 
@@ -53,17 +53,39 @@ test("openai provider parses 3 candidates and nulls disallowed image_url", async
     ],
   };
 
-  const stubFetch = async (url, init) => {
-    if (String(url).endsWith("/admin/assets")) {
-      return Response.json({
-        status: "ok",
-        flat: [{ productName: "A", key: "A/one.jpg", url: allowlistedUrl }],
-        grouped: {},
-      });
-    }
+  const db = {
+    prepare(sql) {
+      assert.match(sql, /FROM email_images/i);
+      return {
+        bind(limit) {
+          assert.equal(limit, 150);
+          return {
+            async all() {
+              return {
+                results: [
+                  {
+                    url: allowlistedUrl,
+                    alt: "Product image",
+                    description: "Use for gift display references",
+                    product_name: "A",
+                  },
+                ],
+              };
+            },
+          };
+        },
+      };
+    },
+  };
 
+  let sawOpenAiCall = false;
+  const stubFetch = async (url, init) => {
     if (String(url).includes("/v1/chat/completions")) {
+      sawOpenAiCall = true;
       assert.equal(init.method, "POST");
+      const body = JSON.parse(init.body);
+      const prompt = body?.messages?.[1]?.content || "";
+      assert.match(prompt, /Use for gift display references/);
       return Response.json({
         choices: [{ message: { content: JSON.stringify(modelOutput) } }],
       });
@@ -75,6 +97,7 @@ test("openai provider parses 3 candidates and nulls disallowed image_url", async
   const provider = new OpenAIProvider({
     apiKey: "test-key",
     baseUrl: "http://127.0.0.1:8787",
+    db,
     fetchImpl: stubFetch,
     policyText: "policy text",
   });
@@ -92,4 +115,5 @@ test("openai provider parses 3 candidates and nulls disallowed image_url", async
   assert.equal(candidates[0].action_line, "Put it into action with 3 accounts.");
   assert.equal(candidates[0].quote_text, "This sells itself.");
   assert.equal(candidates[0].rally_line, "No liquor license required.");
+  assert.equal(sawOpenAiCall, true);
 });

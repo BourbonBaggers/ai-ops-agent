@@ -13,3 +13,7 @@ MS_SENDER_UPN=valid@mailbox.com
 REPLY_TO=valid@address.com
 DEV_EMAIL_KEY=<generate your own GUID>>
 DEV_EMAIL_TEST_TO=test+param@email.com
+# URL of the deployed Cloudflare Worker. Used by preview scripts to fetch the
+# real R2 asset allowlist when the local R2 bucket is empty.
+# Example: ASSETS_WORKER_URL=https://ai-ops-agent.<your-subdomain>.workers.dev
+ASSETS_WORKER_URL=

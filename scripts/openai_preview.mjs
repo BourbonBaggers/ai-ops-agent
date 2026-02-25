@@ -4,6 +4,7 @@ const args = parseArgs(process.argv.slice(2));
 
 const provider = new OpenAIProvider({
   baseUrl: args.base_url || process.env.BASE_URL,
+  assetsBaseUrl: args.assets_base_url || process.env.ASSETS_WORKER_URL || null,
 });
 
 try {
@@ -38,6 +39,11 @@ function parseArgs(argv) {
     }
     if (token === "--base_url" || token === "--base-url") {
       parsed.base_url = argv[i + 1] ?? "";
+      i++;
+      continue;
+    }
+    if (token === "--assets_base_url" || token === "--assets-base-url") {
+      parsed.assets_base_url = argv[i + 1] ?? "";
       i++;
       continue;
     }

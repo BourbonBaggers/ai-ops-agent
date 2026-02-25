@@ -5,6 +5,7 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:8787";
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_POLICY_PATH = path.resolve(process.cwd(), "docs/policy.md");
+const DEFAULT_IMAGE_LIMIT = 150;
 
 export class OpenAIProvider {
   constructor({
@@ -12,7 +13,9 @@ export class OpenAIProvider {
     model = process.env.OPENAI_MODEL || DEFAULT_MODEL,
     openAiUrl = DEFAULT_OPENAI_URL,
     baseUrl = process.env.BASE_URL || DEFAULT_BASE_URL,
-    assetsPath = "/admin/assets",
+    imageCatalogPath = "/admin/email_images",
+    imageLimit = DEFAULT_IMAGE_LIMIT,
+    db = null,
     fetchImpl = fetch,
     policyPath = DEFAULT_POLICY_PATH,
     policyText = null,
@@ -21,7 +24,9 @@ export class OpenAIProvider {
     this.model = model;
     this.openAiUrl = openAiUrl;
     this.baseUrl = baseUrl;
-    this.assetsPath = assetsPath;
+    this.imageCatalogPath = imageCatalogPath;
+    this.imageLimit = imageLimit;
+    this.db = db;
     this.fetchImpl = fetchImpl;
     this.policyPath = policyPath;
     this.policyText = policyText;
@@ -35,7 +40,7 @@ export class OpenAIProvider {
     const variationHint = toNullableString(
       input.variation_hint ?? input.variationHint ?? null
     );
-    const { allowlistedUrls, allowlistedItems } = await this.fetchAssetAllowlist(input);
+    const { allowlistedUrls, allowlistedItems } = await this.fetchImageCatalog(input);
     const policy = await this.loadPolicyText(input);
     const rawText = await this.callOpenAI({ policy, allowlistedItems, variationHint });
     const parsed = parseStrictJson(rawText);
@@ -52,22 +57,52 @@ export class OpenAIProvider {
     );
   }
 
-  async fetchAssetAllowlist(input = {}) {
+  async fetchImageCatalog(input = {}) {
+    const limit = clampInt(input.imageLimit ?? this.imageLimit, 1, 500, DEFAULT_IMAGE_LIMIT);
+    const db = input.db || this.db;
+    if (db) {
+      return this.fetchImageCatalogFromDb(db, limit);
+    }
+
     const baseUrl = stripTrailingSlash(input.baseUrl || this.baseUrl || DEFAULT_BASE_URL);
-    const assetsUrl = input.assetsUrl || `${baseUrl}${this.assetsPath}`;
-    const res = await this.fetchImpl(assetsUrl);
+    const endpointUrl = input.imageCatalogUrl || `${baseUrl}${this.imageCatalogPath}?limit=${limit}`;
+    const res = await this.fetchImpl(endpointUrl);
     const text = await res.text();
     if (!res.ok) {
-      throw new Error(`Failed to fetch allowlist (${res.status}): ${text}`);
+      throw new Error(`Failed to fetch image catalog (${res.status}): ${text}`);
     }
 
     const payload = parseStrictJson(text);
-    const flat = Array.isArray(payload?.flat) ? payload.flat : [];
-    const allowlistedItems = flat
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    const allowlistedItems = rows
       .map((item) => ({
-        productName: toNullableString(item?.productName),
-        key: toNullableString(item?.key),
+        productName: toNullableString(item?.product_name ?? item?.productName),
         url: toNullableString(item?.url),
+        alt: toNullableString(item?.alt),
+        description: toNullableString(item?.description),
+      }))
+      .filter((item) => item.url);
+
+    return {
+      allowlistedUrls: new Set(allowlistedItems.map((item) => item.url)),
+      allowlistedItems,
+    };
+  }
+
+  async fetchImageCatalogFromDb(db, limit) {
+    const rows = await db.prepare(`
+      SELECT url, alt, description, product_name
+      FROM email_images
+      ORDER BY COALESCE(product_name, ''), url
+      LIMIT ?
+    `).bind(limit).all();
+
+    const allowlistedItems = (rows?.results || [])
+      .map((item) => ({
+        productName: toNullableString(item?.product_name),
+        url: toNullableString(item?.url),
+        alt: toNullableString(item?.alt),
+        description: toNullableString(item?.description),
       }))
       .filter((item) => item.url);
 
@@ -86,7 +121,11 @@ export class OpenAIProvider {
 
   async callOpenAI({ policy, allowlistedItems, variationHint }) {
     const allowlistText = allowlistedItems.length
-      ? allowlistedItems.map((item) => `- ${item.url}`).join("\n")
+      ? allowlistedItems
+          .map((item) =>
+            `- url: ${item.url}\n  alt: ${item.alt || ""}\n  description: ${item.description || ""}`
+          )
+          .join("\n")
       : "- (none)";
 
     // All behavioral instructions live in the policy doc.
@@ -209,6 +248,12 @@ function normalizeFunnelStage(value) {
   const v = toNullableString(value);
   if (v === "top" || v === "mid" || v === "bottom") return v;
   throw new Error(`Invalid funnel_stage: ${value}`);
+}
+
+function clampInt(v, min, max, dflt) {
+  const n = Number.parseInt(v ?? "", 10);
+  if (Number.isNaN(n)) return dflt;
+  return Math.max(min, Math.min(max, n));
 }
 
 function stripTrailingSlash(v) {

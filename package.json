@@ -10,7 +10,11 @@
   "scripts": {
     "test": "node --env-file=.dev.vars --test --test-concurrency=1",
     "preview:openai": "node --env-file=.dev.vars scripts/openai_preview.mjs",
-    "preview:template": "node --env-file=.dev.vars scripts/merge_template_preview.mjs"
+    "preview:template": "node --env-file=.dev.vars scripts/merge_template_preview.mjs",
+    "preview:openai:remote": "node --env-file=.dev.vars scripts/_with_remote_worker.mjs scripts/openai_preview.mjs",
+    "preview:template:remote": "node --env-file=.dev.vars scripts/_with_remote_worker.mjs scripts/merge_template_preview.mjs",
+    "images:export": "node --env-file=.dev.vars scripts/images_export_csv.mjs",
+    "images:import": "node --env-file=.dev.vars scripts/images_import_csv.mjs"
   },
   "repository": {
     "type": "git",
