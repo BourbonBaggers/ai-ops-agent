@@ -1,5 +1,6 @@
 const DEFAULT_ASSET_LIBRARY_URL = "https://assets.boozebaggers.com";
 const DEFAULT_UNSUBSCRIBE_LINK = "%%unsubscribe%%";
+const DEFAULT_ACTION_TITLE = "Put it into action...";
 
 export function mergeCandidateIntoTemplate(templateHtml, candidate, options = {}) {
   if (typeof templateHtml !== "string" || !templateHtml.length) {
@@ -20,6 +21,11 @@ export function mergeCandidateIntoTemplate(templateHtml, candidate, options = {}
   const unsubscribeLink = stringOrEmpty(options.unsubscribeLink || DEFAULT_UNSUBSCRIBE_LINK);
   const managePrefsUrl = stringOrEmpty(options.managePrefsUrl || unsubscribeLink);
 
+  // Action-section components — provider returns these separately; template injects styling
+  const actionTitle = stringOrEmpty(candidate.action_line ?? options.actionTitle ?? DEFAULT_ACTION_TITLE);
+  const quoteLine = stringOrEmpty(candidate.quote_text ?? candidate.quote_line);
+  const rallyLine = stringOrEmpty(candidate.rally_line);
+
   let out = templateHtml;
 
   if (imageUrl) {
@@ -34,6 +40,10 @@ export function mergeCandidateIntoTemplate(templateHtml, candidate, options = {}
   out = replaceToken(out, "HEADLINE", subject);
   out = replaceToken(out, "PREVIEW_TEXT", previewText);
   out = replaceToken(out, "BODY_HTML", bodyHtml);
+  out = replaceToken(out, "ACTION_TITLE", actionTitle);
+  out = replaceToken(out, "QUOTE_LINE", quoteLine);
+  out = replaceToken(out, "QUOTE_TEXT", quoteLine);
+  out = replaceToken(out, "RALLY_LINE", rallyLine);
   out = replaceToken(out, "CTA_TEXT", ctaText);
   out = replaceToken(out, "CTA_URL", ctaUrl);
   out = replaceToken(out, "IMAGE_URL", imageUrl ?? "");

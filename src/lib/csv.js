@@ -71,6 +71,7 @@ export function mapContactRow(r) {
     return "";
   };
 
+  const rawOrderCount = get("Order Count", "order_count", "OrderCount", "order count");
   return {
     external_id: get("External ID", "external_id", "ExternalId", "externalId"),
     firstname: get("First Name", "firstname", "first_name", "FirstName"),
@@ -83,7 +84,8 @@ export function mapContactRow(r) {
     state: get("State", "state"),
     zip: get("Zip", "zip", "Postal Code", "postal_code"),
     contact_group: get("Rep Group", "Group", "contact_group", "group"),
-    status: (get("Status", "status") || "active").toLowerCase()
+    status: (get("Status", "status") || "active").toLowerCase(),
+    order_count: Math.max(0, parseInt(rawOrderCount, 10) || 0),
   };
 }
 

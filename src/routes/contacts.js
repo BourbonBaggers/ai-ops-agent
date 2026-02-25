@@ -35,8 +35,8 @@ export async function handleContacts(request, env) {
     return exportContacts(env);
   }
 
-  // PUT /admin/contacts/:id
-  if (method === "PUT" && path.startsWith("/admin/contacts/")) {
+  // PUT or PATCH /admin/contacts/:id
+  if ((method === "PUT" || method === "PATCH") && path.startsWith("/admin/contacts/")) {
     const id = path.split("/").pop();
     return updateContact(id, request, env);
   }
@@ -53,7 +53,7 @@ async function listContacts(url, env) {
   const stmt = env.DB.prepare(`
     SELECT id, external_id, firstname, lastname, email, phone,
            address_line1, address_line2, city, state, zip,
-           contact_group, status, created_at, updated_at
+           contact_group, status, order_count, created_at, updated_at
     FROM contacts
     ${where}
     ORDER BY COALESCE(lastname,''), COALESCE(firstname,''), email
@@ -83,13 +83,15 @@ async function createContact(request, env) {
   const id = crypto.randomUUID();
   const now = nowUtcIso();
 
+  const orderCount = Math.max(0, parseInt(body.order_count, 10) || 0);
+
   await env.DB.prepare(
     `
     INSERT INTO contacts (
       id, external_id, firstname, lastname, email, phone,
       address_line1, address_line2, city, state, zip,
-      contact_group, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      contact_group, status, order_count, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
   )
     .bind(
@@ -106,6 +108,7 @@ async function createContact(request, env) {
       strOrNull(body.zip),
       strOrNull(body.contact_group),
       String(body.status || "active").toLowerCase(),
+      orderCount,
       now,
       now
     )
@@ -132,6 +135,11 @@ async function updateContact(id, request, env) {
     return json({ status: "error", message: "invalid email" }, 400);
   }
 
+  const newOrderCount =
+    body.order_count !== undefined
+      ? Math.max(0, parseInt(body.order_count, 10) || 0)
+      : null;
+
   await env.DB.prepare(
     `
     UPDATE contacts SET
@@ -147,6 +155,7 @@ async function updateContact(id, request, env) {
       zip           = COALESCE(?, zip),
       contact_group = COALESCE(?, contact_group),
       status        = COALESCE(?, status),
+      order_count   = CASE WHEN ? IS NOT NULL THEN ? ELSE order_count END,
       updated_at    = ?
     WHERE id = ?
   `
@@ -164,6 +173,8 @@ async function updateContact(id, request, env) {
       body.zip !== undefined ? strOrNull(body.zip) : null,
       body.contact_group !== undefined ? strOrNull(body.contact_group) : null,
       body.status !== undefined ? String(body.status).toLowerCase() : null,
+      newOrderCount,
+      newOrderCount,
       now,
       id
     )
@@ -209,14 +220,15 @@ async function importContacts(request, env) {
     }
     processed++;
 
+    const importOrderCount = Math.max(0, parseInt(c.order_count, 10) || 0);
     stmts.push(
       env.DB.prepare(
         `
         INSERT INTO contacts (
           id, external_id, firstname, lastname, email, phone,
           address_line1, address_line2, city, state, zip,
-          contact_group, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          contact_group, status, order_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(email) DO UPDATE SET
           external_id   = COALESCE(excluded.external_id, contacts.external_id),
           firstname     = COALESCE(excluded.firstname, contacts.firstname),
@@ -229,6 +241,7 @@ async function importContacts(request, env) {
           zip           = COALESCE(excluded.zip, contacts.zip),
           contact_group = COALESCE(excluded.contact_group, contacts.contact_group),
           status        = COALESCE(excluded.status, contacts.status),
+          order_count   = excluded.order_count,
           updated_at    = excluded.updated_at
       `
       ).bind(
@@ -245,6 +258,7 @@ async function importContacts(request, env) {
         strOrNull(c.zip),
         strOrNull(c.contact_group),
         String(c.status || "active").toLowerCase(),
+        importOrderCount,
         now,
         now
       )
@@ -271,7 +285,7 @@ async function exportContacts(env) {
     `
     SELECT external_id, firstname, lastname, email, phone,
            address_line1, address_line2, city, state, zip,
-           contact_group, status
+           contact_group, status, order_count
     FROM contacts
     ORDER BY COALESCE(lastname,''), COALESCE(firstname,''), email
     LIMIT 5000
@@ -291,6 +305,7 @@ async function exportContacts(env) {
     "Rep Group",
     "Status",
     "External ID",
+    "Order Count",
   ];
 
   const lines = [headers.join(",")];
@@ -310,6 +325,7 @@ async function exportContacts(env) {
         csvEscape(r.contact_group),
         csvEscape(r.status),
         csvEscape(r.external_id),
+        csvEscape(r.order_count ?? 0),
       ].join(",")
     );
   }

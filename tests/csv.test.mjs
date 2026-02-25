@@ -86,6 +86,23 @@ test("mapContactRow: accepts alternate header casing (case-insensitive match)", 
   assert.equal(c.email, "c@x.com");
 });
 
+test("mapContactRow: order_count defaults to 0 when missing", () => {
+  const c = mapContactRow({ "First Name": "Bob" });
+  assert.equal(c.order_count, 0);
+});
+
+test("mapContactRow: order_count parsed from 'Order Count' column", () => {
+  const c = mapContactRow({ "First Name": "Alice", "Order Count": "5" });
+  assert.equal(c.order_count, 5);
+});
+
+test("mapContactRow: order_count clamped to 0 for invalid/negative values", () => {
+  const c1 = mapContactRow({ "Order Count": "not-a-number" });
+  assert.equal(c1.order_count, 0);
+  const c2 = mapContactRow({ "order_count": "-3" });
+  assert.equal(c2.order_count, 0);
+});
+
 // --- csvEscape ---
 
 test("csvEscape: plain value passes through unchanged", () => {

@@ -89,17 +89,16 @@ export class OpenAIProvider {
       ? allowlistedItems.map((item) => `- ${item.url}`).join("\n")
       : "- (none)";
 
-  const userPrompt = [
-    "Follow the policy exactly and return JSON only.",
-    "",
-    `variation_hint: ${variationHint ?? "null"}`,
-    "",
-    "Approved image URL allowlist:",
-    allowlistText,
-    "",
-    "Policy:",
-    policy,
-  ].join("\n");
+    // All behavioral instructions live in the policy doc.
+    // This prompt only provides the three dynamic inputs: allowlist, variation hint, and policy.
+    const userPrompt = [
+      `variation_hint: ${variationHint ?? "null"}`,
+      "",
+      "Approved image URL allowlist:",
+      allowlistText,
+      "",
+      policy,
+    ].join("\n");
 
     const res = await this.fetchImpl(this.openAiUrl, {
       method: "POST",
@@ -113,8 +112,7 @@ export class OpenAIProvider {
         messages: [
           {
             role: "system",
-            content:
-              "You generate internal sales enablement weekly email candidates. Return strict JSON only.",
+            content: "Return strict JSON only.",
           },
           {
             role: "user",
@@ -171,11 +169,21 @@ function normalizeCandidate(candidate, idx, allowlistedUrls) {
   );
   const cta = mustString(candidate.cta, `Candidate ${idx + 1} cta`);
 
+  // Template action-section components (optional — empty string if omitted)
+  const action_line = toNullableString(candidate.action_line);
+  const quote_text = toNullableString(candidate.quote_text);
+  const rally_line = toNullableString(candidate.rally_line);
+
   const requestedImageUrl = toNullableString(candidate.image_url);
   const image_url =
     requestedImageUrl && allowlistedUrls.has(requestedImageUrl) ? requestedImageUrl : null;
 
   const variation_hint = toNullableString(candidate.variation_hint);
+
+  const self_check =
+    candidate.self_check && typeof candidate.self_check === "object"
+      ? candidate.self_check
+      : {};
 
   return {
     funnel_stage,
@@ -184,13 +192,16 @@ function normalizeCandidate(candidate, idx, allowlistedUrls) {
     body_html,
     body_text,
     body: body_text,
+    action_line,
+    quote_text,
+    rally_line,
     cta,
     image_url,
     variation_hint,
     preview_text: preview,
     body_markdown: body_text,
     image_refs: image_url ? [image_url] : [],
-    self_check: {},
+    self_check,
   };
 }
 

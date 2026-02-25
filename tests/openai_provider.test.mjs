@@ -13,6 +13,11 @@ test("openai provider parses 3 candidates and nulls disallowed image_url", async
         subject: "Awareness candidate",
         preview: "Preview one",
         body: "Body one",
+        body_html: "<p>Body one</p>",
+        body_text: "Body one",
+        action_line: "Put it into action with 3 accounts.",
+        quote_text: "This sells itself.",
+        rally_line: "No liquor license required.",
         cta: "Bring this up with three accounts this week.",
         image_url: allowlistedUrl,
         variation_hint: null,
@@ -22,6 +27,11 @@ test("openai provider parses 3 candidates and nulls disallowed image_url", async
         subject: "Education candidate",
         preview: "Preview two",
         body: "Body two",
+        body_html: "<p>Body two</p>",
+        body_text: "Body two",
+        action_line: "Put it into action on your next gift-shop call.",
+        quote_text: "Bourbon drinkers are the hardest to buy for.",
+        rally_line: "Small footprint. Shelf stable.",
         cta: "Add this talking point to your next calls.",
         image_url: invalidUrl,
         variation_hint: "gifting",
@@ -31,6 +41,11 @@ test("openai provider parses 3 candidates and nulls disallowed image_url", async
         subject: "Activation candidate",
         preview: "Preview three",
         body: "Body three",
+        body_html: "<p>Body three</p>",
+        body_text: "Body three",
+        action_line: "Put it into action — pick 2 accounts this week.",
+        quote_text: "This is the gift that sells itself twice.",
+        rally_line: "One shelf spot, year-round turns.",
         cta: "Pitch this to five accounts before Friday.",
         image_url: null,
         variation_hint: null,
@@ -67,6 +82,14 @@ test("openai provider parses 3 candidates and nulls disallowed image_url", async
   const candidates = await provider.generateCandidates({ variation_hint: "gifting" });
   assert.equal(candidates.length, 3);
   assert.equal(candidates[0].image_url, allowlistedUrl);
-  assert.equal(candidates[1].image_url, null);
+  assert.equal(candidates[1].image_url, null);  // disallowed URL nulled out
   assert.equal(candidates[2].image_url, null);
+
+  // New template-section fields should be normalized through
+  assert.equal(candidates[0].funnel_stage, "top");
+  assert.equal(candidates[1].funnel_stage, "mid");
+  assert.equal(candidates[2].funnel_stage, "bottom");
+  assert.equal(candidates[0].action_line, "Put it into action with 3 accounts.");
+  assert.equal(candidates[0].quote_text, "This sells itself.");
+  assert.equal(candidates[0].rally_line, "No liquor license required.");
 });

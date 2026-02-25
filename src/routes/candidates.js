@@ -88,17 +88,24 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
       env.DB.prepare(`
         INSERT INTO candidates (
           id, weekly_run_id, rank, subject, preview_text, body_markdown, cta,
+          funnel_stage, body_html, image_url, action_line, quote_text, rally_line,
           image_refs_json, self_check_json, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         crypto.randomUUID(),
         run.id,
         i + 1,
         c.subject,
-        c.preview_text,
-        c.body_markdown,
+        c.preview_text ?? c.preview ?? null,
+        c.body_markdown ?? c.body_text ?? c.body ?? null,
         c.cta ?? null,
+        c.funnel_stage ?? null,
+        c.body_html ?? null,
+        c.image_url ?? null,
+        c.action_line ?? null,
+        c.quote_text ?? null,
+        c.rally_line ?? null,
         JSON.stringify(c.image_refs ?? []),
         JSON.stringify(c.self_check ?? {}),
         now
@@ -136,6 +143,7 @@ export async function handleCandidates(request, env) {
 
     const rows = await env.DB.prepare(`
       SELECT id, weekly_run_id, rank, subject, preview_text, body_markdown, cta,
+             funnel_stage, body_html, image_url, action_line, quote_text, rally_line,
              image_refs_json, self_check_json, created_at
       FROM candidates
       WHERE weekly_run_id = ?
@@ -182,7 +190,9 @@ export async function handleCandidates(request, env) {
     const run = await ensureWeeklyRun(env, week_of);
 
     const candidate = await env.DB.prepare(`
-      SELECT id, weekly_run_id, rank, subject, preview_text, body_markdown, cta, image_refs_json, self_check_json, created_at
+      SELECT id, weekly_run_id, rank, subject, preview_text, body_markdown, cta,
+             funnel_stage, body_html, image_url, action_line, quote_text, rally_line,
+             image_refs_json, self_check_json, created_at
       FROM candidates
       WHERE weekly_run_id = ? AND rank = ?
       LIMIT 1
