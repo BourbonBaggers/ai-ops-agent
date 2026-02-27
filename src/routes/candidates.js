@@ -84,6 +84,7 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
     }
   });
 
+  validateFunnelDistribution(generated);
 
   const stmts = [];
 
@@ -128,6 +129,27 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
   `).bind(now, now, run.id).run();
 
   return { status: "ok", week_of, weekly_run_id: run.id, generated: generated.length, skipped: false };
+}
+
+function validateFunnelDistribution(candidates) {
+  if (!Array.isArray(candidates) || candidates.length !== 3) {
+    throw new Error(`Invalid candidate count: expected 3, got ${Array.isArray(candidates) ? candidates.length : "non-array"}`);
+  }
+
+  const counts = { top: 0, mid: 0, bottom: 0 };
+  for (const candidate of candidates) {
+    const stage = candidate?.funnel_stage;
+    if (stage === "top" || stage === "mid" || stage === "bottom") {
+      counts[stage] += 1;
+    }
+  }
+
+  if (counts.top !== 1 || counts.mid !== 1 || counts.bottom !== 1) {
+    console.error("Invalid funnel distribution", counts);
+    throw new Error(
+      `Invalid funnel distribution: expected top=1, mid=1, bottom=1; got top=${counts.top}, mid=${counts.mid}, bottom=${counts.bottom}`
+    );
+  }
 }
 
 export async function handleCandidates(request, env) {
