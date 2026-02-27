@@ -1,36 +1,38 @@
-/**
- * Segmentation helper for per-contact candidate selection at send time.
- *
- * Rules:
- *   Cold rep (order_count === 0):
- *     80% probability → top candidate
- *     20% probability → mid candidate
- *
- *   Activated rep (order_count > 0):
- *     50% probability → mid candidate
- *     50% probability → bottom candidate
- *
- * This is intentionally simple. No scoring models. The operator manually
- * sets order_count on each contact via PATCH /admin/contacts/:id.
- *
- * @param {object} contact  - Contact row (must have order_count field)
- * @param {object[]} candidates - Array of candidate objects with funnel_stage field
- * @param {function} [randFn]   - Optional RNG override for testing (default: Math.random)
- * @returns {object|null} The selected candidate, or null if pool is empty
- */
-export function selectCandidateForContact(contact, candidates, randFn = Math.random) {
-  const top = candidates.find((c) => c.funnel_stage === "top") ?? null;
-  const mid = candidates.find((c) => c.funnel_stage === "mid") ?? null;
-  const bottom = candidates.find((c) => c.funnel_stage === "bottom") ?? null;
-
-  const isCold = (contact.order_count ?? 0) === 0;
-  const r = randFn();
-
-  if (isCold) {
-    // 80% top, 20% mid
-    return (r < 0.8 ? top : mid) ?? top ?? mid ?? bottom;
-  } else {
-    // 50% mid, 50% bottom
-    return (r < 0.5 ? mid : bottom) ?? mid ?? bottom ?? top;
+export function selectCandidateForContact(candidates, contact, weeklyRun) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    throw new Error("selectCandidateForContact: candidates must be a non-empty array");
   }
+  if (!contact?.id) {
+    throw new Error("selectCandidateForContact: contact.id is required");
+  }
+  if (!weeklyRun?.week_of) {
+    throw new Error("selectCandidateForContact: weeklyRun.week_of is required");
+  }
+
+  const salt = String(weeklyRun.week_of);
+  const bucket = stableHash(`${contact.id}${salt}`) % 4;
+  const isCold = Number(contact.order_count ?? 0) === 0;
+
+  let targetStage;
+  if (isCold) {
+    targetStage = bucket === 3 ? "mid" : "top";
+  } else {
+    targetStage = bucket === 3 ? "mid" : "bottom";
+  }
+
+  const selected = candidates.find((c) => c?.funnel_stage === targetStage);
+  if (!selected) {
+    throw new Error(`selectCandidateForContact: missing candidate for funnel_stage=${targetStage}`);
+  }
+
+  return selected;
+}
+
+export function stableHash(input) {
+  let hash = 5381;
+  const s = String(input);
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) + hash + s.charCodeAt(i)) | 0;
+  }
+  return hash >>> 0;
 }

@@ -2,6 +2,7 @@ import { json, normalizePath } from "../lib/utils.js";
 import { nowUtcIso, nowInTzISO, getWeekOf, getPartsInTz } from "../lib/time.js";
 import { loadSettings } from "../lib/settings.js";
 import { generateCandidatesForWeek } from "./candidates.js";
+import { selectCandidateForContact } from "../lib/segmentation.js";
 
 
 export async function handleJobs(request, env) {
@@ -191,6 +192,34 @@ export async function sendStub(env, run, nowZ) {
 
   if (!cand) return false; // no candidates generated yet — skip silently
 
+  const candidateRows = await env.DB.prepare(`
+    SELECT id, funnel_stage
+    FROM candidates
+    WHERE weekly_run_id = ?
+    ORDER BY rank ASC
+  `).bind(run.id).all();
+
+  const activeContacts = await env.DB.prepare(`
+    SELECT id, order_count
+    FROM contacts
+    WHERE status = 'active'
+    ORDER BY id
+  `).all();
+
+  const stageCounts = { top: 0, mid: 0, bottom: 0 };
+  for (const contact of activeContacts.results ?? []) {
+    const selected = selectCandidateForContact(candidateRows.results ?? [], contact, run);
+    if (selected?.funnel_stage === "top" || selected?.funnel_stage === "mid" || selected?.funnel_stage === "bottom") {
+      stageCounts[selected.funnel_stage] += 1;
+    }
+  }
+
+  console.log("[sendStub] selected_funnel_stage_counts", JSON.stringify({
+    week_of: run.week_of,
+    total_contacts: activeContacts.results?.length ?? 0,
+    counts: stageCounts,
+  }));
+
   const isDev = (env.ENVIRONMENT || "").toLowerCase() === "dev";
 
   // Support both legacy + current names
@@ -258,4 +287,3 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-
