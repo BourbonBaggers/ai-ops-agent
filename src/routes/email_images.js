@@ -81,7 +81,6 @@ async function uploadEmailImages(request, env) {
   }
 
   const stmts = [
-    env.DB.prepare("BEGIN IMMEDIATE"),
     env.DB.prepare("DELETE FROM email_images"),
     ...rows.map((row) =>
       env.DB.prepare(
@@ -89,17 +88,11 @@ async function uploadEmailImages(request, env) {
          VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
       ).bind(row.url, row.alt, row.description, row.product_name)
     ),
-    env.DB.prepare("COMMIT"),
   ];
 
   try {
     await env.DB.batch(stmts);
   } catch (err) {
-    try {
-      await env.DB.prepare("ROLLBACK").run();
-    } catch {
-      // ignore rollback errors
-    }
     return json(
       { status: "error", rows_inserted: 0, errors: [err?.message || "Upload failed"] },
       400

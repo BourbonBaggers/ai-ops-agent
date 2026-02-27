@@ -1,6 +1,6 @@
 import { json, normalizePath, safeJson } from "../lib/utils.js";
 import { nowUtcIso, isYmd, utcDateStr } from "../lib/time.js";
-import { MockProvider } from "../providers/mockProvider.js";
+import { OpenAIProvider } from "../providers/openaiProvider.js";
 
 // Public exports so jobs.js can call generation without HTTP
 export async function generateCandidatesForWeek(env, week_of, { force = false } = {}) {
@@ -67,9 +67,14 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
   }
   await env.DB.prepare(`DELETE FROM candidates WHERE weekly_run_id = ?`).bind(run.id).run();
 
-  const provider = new MockProvider();
+  const provider = new OpenAIProvider({
+    apiKey: env.OPEN_AI_KEY,
+    model: env.OPENAI_MODEL,
+    db: env.DB,
+  });
   const generated = await provider.generateCandidates({
     policy,
+    policyText: policy.body_markdown,
     calendarItems: horizon,
     focusNotes: run.focus_notes || null,
     constraints: {
@@ -275,4 +280,3 @@ async function getCalendarHorizon(env, days) {
 
   return rows.results;
 }
-
