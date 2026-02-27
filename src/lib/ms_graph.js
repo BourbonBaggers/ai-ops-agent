@@ -15,10 +15,14 @@ export async function getGraphToken(env) {
     return tokenCache.accessToken;
   }
 
-  const url = `https://login.microsoftonline.com/${env.MS_TENANT_ID}/oauth2/v2.0/token`;
+  const tenantId = env.GRAPH_TENANT_ID || env.MS_TENANT_ID;
+  const clientId = env.GRAPH_CLIENT_ID || env.MS_CLIENT_ID;
+  const clientSecret = env.GRAPH_CLIENT_SECRET || env.MS_CLIENT_SECRET;
+
+  const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
   const body = new URLSearchParams();
-  body.set("client_id", env.MS_CLIENT_ID);
-  body.set("client_secret", env.MS_CLIENT_SECRET);
+  body.set("client_id", clientId);
+  body.set("client_secret", clientSecret);
   body.set("grant_type", "client_credentials");
   body.set("scope", "https://graph.microsoft.com/.default"); // client creds pattern  [oai_citation:4‡Microsoft Learn](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-client-creds-grant-flow)
 
@@ -39,7 +43,7 @@ export async function getGraphToken(env) {
   return tokenCache.accessToken;
 }
 
-export async function graphSendMail(env, { fromUpn, to, subject, text }) {
+export async function graphSendMail(env, { fromUpn, to, subject, html, text }) {
   const token = await getGraphToken(env);
 
   // POST /users/{id|UPN}/sendMail  [oai_citation:5‡Microsoft Learn](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0)
@@ -47,9 +51,12 @@ export async function graphSendMail(env, { fromUpn, to, subject, text }) {
 
   const replyTo = (env.REPLY_TO || "").trim();
 
+  const htmlBody = (typeof html === "string" && html.trim()) ? html : null;
+  const textBody = (typeof text === "string" && text.trim()) ? text : "";
+
   const message = {
     subject,
-    body: { contentType: "Text", content: text },
+    body: { contentType: htmlBody ? "HTML" : "Text", content: htmlBody || textBody },
     toRecipients: [{ emailAddress: { address: to } }],
     ...(replyTo
       ? { replyTo: [{ emailAddress: { address: replyTo } }] }

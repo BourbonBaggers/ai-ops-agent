@@ -16,12 +16,12 @@ export async function handleDevEmail(request, env) {
   if (!to) throw badRequest("Missing 'to'");
 
   const result = await graphSendMail(env, {
-    fromUpn: env.MS_SENDER_UPN,
+    fromUpn: env.GRAPH_SENDER_EMAIL || env.MS_SENDER_UPN,
     to,
     subject,
+    html: body?.html || null,
     text,
   });
 
   return json({ status: "ok", result });
 }
-

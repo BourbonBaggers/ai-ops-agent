@@ -3,6 +3,7 @@ import { nowUtcIso, nowInTzISO, getWeekOf, getPartsInTz } from "../lib/time.js";
 import { loadSettings } from "../lib/settings.js";
 import { generateCandidatesForWeek } from "./candidates.js";
 import { selectCandidateForContact } from "../lib/segmentation.js";
+import { graphSendMail } from "../lib/ms_graph.js";
 
 
 export async function handleJobs(request, env) {
@@ -56,7 +57,7 @@ async function tick(request, env) {
   const run3 = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`).bind(week_of).first();
 
   if (dow === schedule.send.dow && hhmm === schedule.send.time) {
-    const didSend = await sendStub(env, run3, nowUtc);
+    const didSend = await sendWeeklyRun(env, run3, nowUtc);
     if (didSend) actions.push("send_stub");
   }
 
@@ -140,27 +141,7 @@ export async function lockWeeklyRun(env, run, nowZ) {
   return true;
 }
 
-export async function sendStub(env, run, nowZ) {
-  // If we've already created a send row for this weekly_run, don't do it again.
-  // (This is conservative. With your new uniqueness constraint, this is still fine.)
-  const existing = await env.DB.prepare(`
-    SELECT id FROM sends
-    WHERE weekly_run_id = ?
-    LIMIT 1
-  `).bind(run.id).first();
-
-  if (existing?.id) {
-    // Backfill weekly_runs in case earlier code inserted sends but never updated the run.
-    if (!run.sent_at) {
-      await env.DB.prepare(`
-        UPDATE weekly_runs
-        SET sent_at = ?, status = 'sent_stub', updated_at = ?
-        WHERE id = ?
-      `).bind(nowZ, nowZ, run.id).run();
-    }
-    return false;
-  }
-
+export async function sendWeeklyRun(env, run, nowZ) {
   // If not locked yet, lock it right now (enforces “auto-authorized”)
   if (!run.locked_at) {
     await lockWeeklyRun(env, run, nowZ);
@@ -214,7 +195,7 @@ export async function sendStub(env, run, nowZ) {
     }
   }
 
-  console.log("[sendStub] selected_funnel_stage_counts", JSON.stringify({
+  console.log("[sendWeeklyRun] selected_funnel_stage_counts", JSON.stringify({
     week_of: run.week_of,
     total_contacts: activeContacts.results?.length ?? 0,
     counts: stageCounts,
@@ -224,8 +205,10 @@ export async function sendStub(env, run, nowZ) {
 
   // Support both legacy + current names
   const senderMailbox =
+    env.GRAPH_SENDER_EMAIL ||
     env.MAIL_SENDER_UPN ||
     env.SENDER_MAILBOX ||
+    env.MS_SENDER_UPN ||
     (isDev ? "stub-sender@example.com" : null);
 
   const replyTo =
@@ -234,49 +217,172 @@ export async function sendStub(env, run, nowZ) {
 
   if (!senderMailbox || !replyTo) {
     throw new Error(
-      "Missing required mail environment variables. Expected MAIL_SENDER_UPN (or SENDER_MAILBOX) and REPLY_TO."
+      "Missing required mail environment variables. Expected GRAPH_SENDER_EMAIL (or MAIL_SENDER_UPN/SENDER_MAILBOX/MS_SENDER_UPN) and REPLY_TO."
     );
   }
 
-  const sendId = crypto.randomUUID();
-  const trackingSalt = crypto.randomUUID();
+  const bodyHtml = cand.body_html?.trim()
+    ? cand.body_html
+    : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
+        cand.body_markdown || ""
+      )}</pre>`;
+  const bodyText = (cand.body_text || cand.body_markdown || "").replace(/\r\n/g, "\n");
 
-  const bodyHtml = `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
-    cand.body_markdown || ""
-  )}</pre>`;
-  const bodyText = (cand.body_markdown || "").replace(/\r\n/g, "\n");
+  let send = await env.DB.prepare(`
+    SELECT id, tracking_salt
+    FROM sends
+    WHERE weekly_run_id = ? AND candidate_id = ?
+    LIMIT 1
+  `).bind(run.id, cand.id).first();
 
-  const insert = await env.DB.prepare(`
-    INSERT OR IGNORE INTO sends (
-      id, weekly_run_id, candidate_id,
-      subject, preview_text, body_html, body_text,
-      sender_mailbox, reply_to, tracking_salt, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    sendId,
-    run.id,
-    cand.id,
-    cand.subject,
-    cand.preview_text,
-    bodyHtml,
-    bodyText,
-    senderMailbox,
-    replyTo,
-    trackingSalt,
-    nowZ
-  ).run();
+  if (!send) {
+    const sendId = crypto.randomUUID();
+    const trackingSalt = crypto.randomUUID();
 
-  const didInsert = (insert?.meta?.changes ?? 0) > 0;
-  if (!didInsert) return false;
+    const insert = await env.DB.prepare(`
+      INSERT OR IGNORE INTO sends (
+        id, weekly_run_id, candidate_id,
+        subject, preview_text, body_html, body_text,
+        sender_mailbox, reply_to, tracking_salt, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      sendId,
+      run.id,
+      cand.id,
+      cand.subject,
+      cand.preview_text,
+      bodyHtml,
+      bodyText,
+      senderMailbox,
+      replyTo,
+      trackingSalt,
+      nowZ
+    ).run();
 
-  // Mark the run as "sent_stub"
-  await env.DB.prepare(`
-    UPDATE weekly_runs
-    SET sent_at = ?, status = 'sent_stub', updated_at = ?
-    WHERE id = ?
-  `).bind(nowZ, nowZ, run.id).run();
+    const didInsert = (insert?.meta?.changes ?? 0) > 0;
+    if (!didInsert) return false;
 
-  return true;
+    send = { id: sendId, tracking_salt: trackingSalt };
+  }
+
+  const contactsRes = await env.DB.prepare(`
+    SELECT id, email, order_count
+    FROM contacts
+    WHERE status = 'active'
+    ORDER BY COALESCE(lastname,''), COALESCE(firstname,''), email
+  `).all();
+
+  let sentCount = 0;
+  const errors = [];
+
+  for (const contact of contactsRes.results ?? []) {
+    const existing = await env.DB.prepare(`
+      SELECT id, status
+      FROM send_recipients
+      WHERE send_id = ? AND contact_id = ?
+      LIMIT 1
+    `).bind(send.id, contact.id).first();
+
+    if (existing?.status === "sent") {
+      continue;
+    }
+
+    try {
+      const selectedForContact = selectCandidateForContact(candidateRows.results ?? [], contact, run);
+      const result = await graphSendMail(env, {
+        fromUpn: senderMailbox,
+        to: contact.email,
+        subject: cand.subject,
+        html: bodyHtml,
+        text: bodyText,
+      });
+
+      const providerMessageId = result?.id || result?.messageId || null;
+
+      if (existing?.id) {
+        await env.DB.prepare(`
+          UPDATE send_recipients
+          SET status = 'sent',
+              provider_message_id = ?,
+              error = NULL,
+              sent_at = ?
+          WHERE id = ?
+        `).bind(providerMessageId, nowZ, existing.id).run();
+      } else {
+        await env.DB.prepare(`
+          INSERT INTO send_recipients
+            (id, send_id, contact_id, email, status, provider_message_id, error, sent_at, created_at)
+          VALUES (?, ?, ?, ?, 'sent', ?, NULL, ?, ?)
+        `).bind(
+          crypto.randomUUID(),
+          send.id,
+          contact.id,
+          contact.email,
+          providerMessageId,
+          nowZ,
+          nowZ
+        ).run();
+      }
+
+      sentCount++;
+      console.log("[sendWeeklyRun] delivered", JSON.stringify({
+        weekly_run_id: run.id,
+        contact_id: contact.id,
+        funnel_stage: selectedForContact.funnel_stage,
+      }));
+    } catch (err) {
+      const msg = err?.message || String(err);
+      errors.push({ contact_id: contact.id, email: contact.email, error: msg });
+      console.error("[sendWeeklyRun] delivery_failed", JSON.stringify({
+        weekly_run_id: run.id,
+        contact_id: contact.id,
+        email: contact.email,
+        error: msg,
+      }));
+
+      if (existing?.id) {
+        await env.DB.prepare(`
+          UPDATE send_recipients
+          SET status = 'failed',
+              error = ?,
+              sent_at = NULL
+          WHERE id = ?
+        `).bind(msg, existing.id).run();
+      } else {
+        await env.DB.prepare(`
+          INSERT INTO send_recipients
+            (id, send_id, contact_id, email, status, provider_message_id, error, sent_at, created_at)
+          VALUES (?, ?, ?, ?, 'failed', NULL, ?, NULL, ?)
+        `).bind(
+          crypto.randomUUID(),
+          send.id,
+          contact.id,
+          contact.email,
+          msg,
+          nowZ
+        ).run();
+      }
+    }
+  }
+
+  if (sentCount > 0) {
+    await env.DB.prepare(`
+      UPDATE weekly_runs
+      SET sent_at = ?, status = 'sent', updated_at = ?
+      WHERE id = ?
+    `).bind(nowZ, nowZ, run.id).run();
+  }
+
+  if (errors.length) {
+    console.error("[sendWeeklyRun] error_summary", JSON.stringify({
+      weekly_run_id: run.id,
+      failed: errors.length,
+      sent: sentCount,
+      errors,
+    }));
+  }
+
+  return sentCount > 0;
 }
 
 function escapeHtml(s) {

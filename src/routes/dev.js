@@ -2,7 +2,7 @@ import { json, normalizePath } from "../lib/utils.js";
 import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
 import { loadSettings } from "../lib/settings.js";
 
-import { ensureWeeklyRun, lockWeeklyRun, sendStub } from "./jobs.js";
+import { ensureWeeklyRun, lockWeeklyRun, sendWeeklyRun } from "./jobs.js";
 import { generateCandidatesForWeek } from "./candidates.js";
 
 export async function handleDev(request, env) {
@@ -117,7 +117,7 @@ export async function handleDev(request, env) {
       .first();
 
     // 3) Send stub (use UTC timestamp for DB)
-    const sent_stub = await sendStub(env, run, now_utc);
+    const sent_stub = await sendWeeklyRun(env, run, now_utc);
 
     run = await env.DB
       .prepare(`SELECT * FROM weekly_runs WHERE id = ?`)
