@@ -142,14 +142,16 @@ export async function lockWeeklyRun(env, run, nowZ) {
 }
 
 export async function sendWeeklyRun(env, run, nowZ) {
+  const startedAt = nowZ || nowUtcIso();
+
   // If not locked yet, lock it right now (enforces “auto-authorized”)
-  if (!run.locked_at) {
-    await lockWeeklyRun(env, run, nowZ);
+  if (run && !run.locked_at) {
+    await lockWeeklyRun(env, run, startedAt);
     run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE id = ?`).bind(run.id).first();
   }
 
   // Ensure we have a selected candidate (lock should have done this, but belt+suspenders)
-  if (!run.selected_candidate_id) {
+  if (run && !run.selected_candidate_id) {
     const first = await env.DB.prepare(`
       SELECT id FROM candidates
       WHERE weekly_run_id = ? AND rank = 1
@@ -161,45 +163,28 @@ export async function sendWeeklyRun(env, run, nowZ) {
         UPDATE weekly_runs
         SET selected_candidate_id = ?, updated_at = ?
         WHERE id = ?
-      `).bind(first.id, nowZ, run.id).run();
+      `).bind(first.id, startedAt, run.id).run();
 
       run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE id = ?`).bind(run.id).first();
     }
   }
 
-  const cand = run.selected_candidate_id
-    ? await env.DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(run.selected_candidate_id).first()
-    : null;
-
-  if (!cand) return false; // no candidates generated yet — skip silently
-
   const candidateRows = await env.DB.prepare(`
-    SELECT id, funnel_stage
+    SELECT id, funnel_stage, subject, preview_text, body_markdown, body_html, body_text
     FROM candidates
     WHERE weekly_run_id = ?
     ORDER BY rank ASC
   `).bind(run.id).all();
+  const candidateById = new Map((candidateRows.results || []).map((c) => [c.id, c]));
+
+  if (!candidateRows.results?.length) return false; // no candidates generated yet — skip silently
 
   const activeContacts = await env.DB.prepare(`
-    SELECT id, order_count
+    SELECT id, email, order_count
     FROM contacts
     WHERE status = 'active'
     ORDER BY id
   `).all();
-
-  const stageCounts = { top: 0, mid: 0, bottom: 0 };
-  for (const contact of activeContacts.results ?? []) {
-    const selected = selectCandidateForContact(candidateRows.results ?? [], contact, run);
-    if (selected?.funnel_stage === "top" || selected?.funnel_stage === "mid" || selected?.funnel_stage === "bottom") {
-      stageCounts[selected.funnel_stage] += 1;
-    }
-  }
-
-  console.log("[sendWeeklyRun] selected_funnel_stage_counts", JSON.stringify({
-    week_of: run.week_of,
-    total_contacts: activeContacts.results?.length ?? 0,
-    counts: stageCounts,
-  }));
 
   const isDev = (env.ENVIRONMENT || "").toLowerCase() === "dev";
 
@@ -221,168 +206,213 @@ export async function sendWeeklyRun(env, run, nowZ) {
     );
   }
 
-  const bodyHtml = cand.body_html?.trim()
-    ? cand.body_html
-    : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
-        cand.body_markdown || ""
-      )}</pre>`;
-  const bodyText = (cand.body_text || cand.body_markdown || "").replace(/\r\n/g, "\n");
-
-  let send = await env.DB.prepare(`
-    SELECT id, tracking_salt
+  const sendRows = await env.DB.prepare(`
+    SELECT id, candidate_id
     FROM sends
-    WHERE weekly_run_id = ? AND candidate_id = ?
-    LIMIT 1
-  `).bind(run.id, cand.id).first();
+    WHERE weekly_run_id = ?
+  `).bind(run.id).all();
+  const sendByCandidateId = new Map((sendRows.results || []).map((row) => [row.candidate_id, row]));
 
-  if (!send) {
-    const sendId = crypto.randomUUID();
-    const trackingSalt = crypto.randomUUID();
+  const sendMail = typeof env.GRAPH_SEND_IMPL === "function" ? env.GRAPH_SEND_IMPL : graphSendMail;
 
-    const insert = await env.DB.prepare(`
-      INSERT OR IGNORE INTO sends (
-        id, weekly_run_id, candidate_id,
-        subject, preview_text, body_html, body_text,
-        sender_mailbox, reply_to, tracking_salt, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      sendId,
-      run.id,
-      cand.id,
-      cand.subject,
-      cand.preview_text,
-      bodyHtml,
-      bodyText,
-      senderMailbox,
-      replyTo,
-      trackingSalt,
-      nowZ
-    ).run();
+  const summary = {
+    contacts_total: activeContacts.results?.length ?? 0,
+    attempted: 0,
+    sent_success: 0,
+    failed: 0,
+    skipped_already_sent: 0,
+    top_count: 0,
+    mid_count: 0,
+    bottom_count: 0,
+    errors: [],
+    sample: [],
+  };
 
-    const didInsert = (insert?.meta?.changes ?? 0) > 0;
-    if (!didInsert) return false;
+  for (const contact of activeContacts.results ?? []) {
+    const selectedForContact = selectCandidateForContact(candidateRows.results ?? [], contact, run);
+    const stage = selectedForContact.funnel_stage;
+    if (stage === "top" || stage === "mid" || stage === "bottom") {
+      summary[`${stage}_count`] += 1;
+    }
 
-    send = { id: sendId, tracking_salt: trackingSalt };
-  }
+    let send = sendByCandidateId.get(selectedForContact.id);
+    if (!send) {
+      const bodyHtml = selectedForContact.body_html?.trim()
+        ? selectedForContact.body_html
+        : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
+            selectedForContact.body_markdown || ""
+          )}</pre>`;
+      const bodyText = (selectedForContact.body_text || selectedForContact.body_markdown || "").replace(/\r\n/g, "\n");
+      const sendId = crypto.randomUUID();
 
-  const contactsRes = await env.DB.prepare(`
-    SELECT id, email, order_count
-    FROM contacts
-    WHERE status = 'active'
-    ORDER BY COALESCE(lastname,''), COALESCE(firstname,''), email
-  `).all();
+      const insert = await env.DB.prepare(`
+        INSERT OR IGNORE INTO sends (
+          id, weekly_run_id, candidate_id,
+          subject, preview_text, body_html, body_text,
+          sender_mailbox, reply_to, tracking_salt, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        sendId,
+        run.id,
+        selectedForContact.id,
+        selectedForContact.subject,
+        selectedForContact.preview_text,
+        bodyHtml,
+        bodyText,
+        senderMailbox,
+        replyTo,
+        crypto.randomUUID(),
+        startedAt
+      ).run();
 
-  let sentCount = 0;
-  const errors = [];
+      const didInsert = (insert?.meta?.changes ?? 0) > 0;
+      if (!didInsert) {
+        send = await env.DB.prepare(`
+          SELECT id, candidate_id
+          FROM sends
+          WHERE weekly_run_id = ? AND candidate_id = ?
+          LIMIT 1
+        `).bind(run.id, selectedForContact.id).first();
+      } else {
+        send = { id: sendId, candidate_id: selectedForContact.id };
+      }
 
-  for (const contact of contactsRes.results ?? []) {
-    const existing = await env.DB.prepare(`
+      sendByCandidateId.set(selectedForContact.id, send);
+    }
+
+    if (!send?.id) {
+      throw new Error(`Unable to resolve send artifact for candidate ${selectedForContact.id}`);
+    }
+
+    const existingDelivery = await env.DB.prepare(`
       SELECT id, status
-      FROM send_recipients
+      FROM send_deliveries
       WHERE send_id = ? AND contact_id = ?
       LIMIT 1
     `).bind(send.id, contact.id).first();
 
-    if (existing?.status === "sent") {
+    if (existingDelivery) {
+      summary.skipped_already_sent += 1;
       continue;
     }
 
+    const deliveryId = crypto.randomUUID();
+    await env.DB.prepare(`
+      INSERT INTO send_deliveries
+        (id, send_id, weekly_run_id, candidate_id, contact_id, recipient_email, funnel_stage, status, graph_status, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?)
+    `).bind(
+      deliveryId,
+      send.id,
+      run.id,
+      selectedForContact.id,
+      contact.id,
+      contact.email,
+      stage,
+      startedAt
+    ).run();
+
+    summary.attempted += 1;
+
+    const candidate = candidateById.get(selectedForContact.id) || selectedForContact;
+    const candidateBodyHtml = candidate.body_html?.trim()
+      ? candidate.body_html
+      : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
+          candidate.body_markdown || ""
+        )}</pre>`;
+    const candidateBodyText = (candidate.body_text || candidate.body_markdown || "").replace(/\r\n/g, "\n");
+
     try {
-      const selectedForContact = selectCandidateForContact(candidateRows.results ?? [], contact, run);
-      const result = await graphSendMail(env, {
+      const result = await sendMail(env, {
         fromUpn: senderMailbox,
         to: contact.email,
-        subject: cand.subject,
-        html: bodyHtml,
-        text: bodyText,
+        subject: candidate.subject,
+        html: candidateBodyHtml,
+        text: candidateBodyText,
       });
 
-      const providerMessageId = result?.id || result?.messageId || null;
+      await env.DB.prepare(`
+        UPDATE send_deliveries
+        SET status = 'sent',
+            graph_status = ?,
+            error = NULL
+        WHERE id = ?
+      `).bind(result?.status ?? null, deliveryId).run();
 
-      if (existing?.id) {
-        await env.DB.prepare(`
-          UPDATE send_recipients
-          SET status = 'sent',
-              provider_message_id = ?,
-              error = NULL,
-              sent_at = ?
-          WHERE id = ?
-        `).bind(providerMessageId, nowZ, existing.id).run();
-      } else {
-        await env.DB.prepare(`
-          INSERT INTO send_recipients
-            (id, send_id, contact_id, email, status, provider_message_id, error, sent_at, created_at)
-          VALUES (?, ?, ?, ?, 'sent', ?, NULL, ?, ?)
-        `).bind(
-          crypto.randomUUID(),
-          send.id,
-          contact.id,
-          contact.email,
-          providerMessageId,
-          nowZ,
-          nowZ
-        ).run();
+      summary.sent_success += 1;
+      if (summary.sample.length < 10) {
+        summary.sample.push({ contact_id: contact.id, status: "sent", funnel_stage: stage });
       }
-
-      sentCount++;
-      console.log("[sendWeeklyRun] delivered", JSON.stringify({
-        weekly_run_id: run.id,
-        contact_id: contact.id,
-        funnel_stage: selectedForContact.funnel_stage,
-      }));
     } catch (err) {
       const msg = err?.message || String(err);
-      errors.push({ contact_id: contact.id, email: contact.email, error: msg });
-      console.error("[sendWeeklyRun] delivery_failed", JSON.stringify({
-        weekly_run_id: run.id,
-        contact_id: contact.id,
-        email: contact.email,
-        error: msg,
-      }));
+      await env.DB.prepare(`
+        UPDATE send_deliveries
+        SET status = 'failed',
+            graph_status = NULL,
+            error = ?
+        WHERE id = ?
+      `).bind(msg, deliveryId).run();
 
-      if (existing?.id) {
-        await env.DB.prepare(`
-          UPDATE send_recipients
-          SET status = 'failed',
-              error = ?,
-              sent_at = NULL
-          WHERE id = ?
-        `).bind(msg, existing.id).run();
-      } else {
-        await env.DB.prepare(`
-          INSERT INTO send_recipients
-            (id, send_id, contact_id, email, status, provider_message_id, error, sent_at, created_at)
-          VALUES (?, ?, ?, ?, 'failed', NULL, ?, NULL, ?)
-        `).bind(
-          crypto.randomUUID(),
-          send.id,
-          contact.id,
-          contact.email,
-          msg,
-          nowZ
-        ).run();
+      summary.failed += 1;
+      summary.errors.push({ contact_id: contact.id, email: contact.email, error: msg });
+      if (summary.sample.length < 10) {
+        summary.sample.push({ contact_id: contact.id, status: "failed", funnel_stage: stage, error: msg });
       }
     }
   }
 
-  if (sentCount > 0) {
+  if (summary.sent_success > 0) {
     await env.DB.prepare(`
       UPDATE weekly_runs
       SET sent_at = ?, status = 'sent', updated_at = ?
       WHERE id = ?
-    `).bind(nowZ, nowZ, run.id).run();
+    `).bind(startedAt, startedAt, run.id).run();
   }
 
-  if (errors.length) {
-    console.error("[sendWeeklyRun] error_summary", JSON.stringify({
-      weekly_run_id: run.id,
-      failed: errors.length,
-      sent: sentCount,
-      errors,
-    }));
-  }
+  const finishedAt = nowUtcIso();
+  const errorRollup = buildErrorRollup(summary.errors);
+  await env.DB.prepare(`
+    INSERT INTO run_log (
+      id, weekly_run_id, started_at, finished_at, dry_run,
+      contacts_total, attempted, sent_success, failed, skipped_already_sent,
+      top_count, mid_count, bottom_count, error_rollup_json, sample_json
+    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(),
+    run.id,
+    startedAt,
+    finishedAt,
+    summary.contacts_total,
+    summary.attempted,
+    summary.sent_success,
+    summary.failed,
+    summary.skipped_already_sent,
+    summary.top_count,
+    summary.mid_count,
+    summary.bottom_count,
+    JSON.stringify(errorRollup),
+    JSON.stringify(summary.sample)
+  ).run();
 
-  return sentCount > 0;
+  console.log("[sendWeeklyRun] batch_summary", JSON.stringify({
+    weekly_run_id: run.id,
+    week_of: run.week_of,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    dry_run: 0,
+    contacts_total: summary.contacts_total,
+    attempted: summary.attempted,
+    sent_success: summary.sent_success,
+    failed: summary.failed,
+    skipped_already_sent: summary.skipped_already_sent,
+    top_count: summary.top_count,
+    mid_count: summary.mid_count,
+    bottom_count: summary.bottom_count,
+    error_rollup: errorRollup,
+    sample: summary.sample,
+  }));
+
+  return summary.sent_success > 0;
 }
 
 function escapeHtml(s) {
@@ -392,4 +422,13 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function buildErrorRollup(errors) {
+  const byMessage = {};
+  for (const e of errors || []) {
+    const key = e?.error || "unknown_error";
+    byMessage[key] = (byMessage[key] || 0) + 1;
+  }
+  return { total: errors?.length || 0, by_message: byMessage };
 }

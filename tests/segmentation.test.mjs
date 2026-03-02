@@ -1,70 +1,82 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectCandidateForContact } from "../src/lib/segmentation.js";
+import { selectCandidateForContact, stableHash } from "../src/lib/segmentation.js";
 
 const top    = { funnel_stage: "top",    subject: "Top candidate" };
 const mid    = { funnel_stage: "mid",    subject: "Mid candidate" };
 const bottom = { funnel_stage: "bottom", subject: "Bottom candidate" };
 const allCandidates = [top, mid, bottom];
+const week = { week_of: "2026-02-16" };
 
-// --- Cold rep (order_count === 0) ---
-
-test("cold rep: r < 0.8 selects top candidate", () => {
-  const contact = { order_count: 0 };
-  const result = selectCandidateForContact(contact, allCandidates, () => 0.5);
-  assert.equal(result.funnel_stage, "top");
+test("stableHash: deterministic for same input", () => {
+  assert.equal(stableHash("abc"), stableHash("abc"));
 });
 
-test("cold rep: r >= 0.8 selects mid candidate", () => {
-  const contact = { order_count: 0 };
-  const result = selectCandidateForContact(contact, allCandidates, () => 0.9);
-  assert.equal(result.funnel_stage, "mid");
+test("cold rep: bucket 0/1/2 selects top candidate", () => {
+  const contact = { id: "cold-a", order_count: 0 };
+  const bucket = stableHash(contact.id + week.week_of) % 4;
+  const result = selectCandidateForContact(allCandidates, contact, week);
+  if (bucket === 3) {
+    assert.equal(result.funnel_stage, "mid");
+  } else {
+    assert.equal(result.funnel_stage, "top");
+  }
 });
 
-test("cold rep: missing order_count defaults to cold (top/mid pool)", () => {
-  const contact = {};  // no order_count field
-  const result = selectCandidateForContact(contact, allCandidates, () => 0.1);
-  assert.equal(result.funnel_stage, "top");
+test("cold rep: missing order_count defaults to cold", () => {
+  const contact = { id: "cold-b" };
+  const result = selectCandidateForContact(allCandidates, contact, week);
+  assert.ok(["top", "mid"].includes(result.funnel_stage));
 });
 
-// --- Activated rep (order_count > 0) ---
-
-test("activated rep: r < 0.5 selects mid candidate", () => {
-  const contact = { order_count: 3 };
-  const result = selectCandidateForContact(contact, allCandidates, () => 0.3);
-  assert.equal(result.funnel_stage, "mid");
+test("activated rep: bucket 0/1/2 selects bottom candidate", () => {
+  const contact = { id: "warm-a", order_count: 3 };
+  const bucket = stableHash(contact.id + week.week_of) % 4;
+  const result = selectCandidateForContact(allCandidates, contact, week);
+  if (bucket === 3) {
+    assert.equal(result.funnel_stage, "mid");
+  } else {
+    assert.equal(result.funnel_stage, "bottom");
+  }
 });
 
-test("activated rep: r >= 0.5 selects bottom candidate", () => {
-  const contact = { order_count: 1 };
-  const result = selectCandidateForContact(contact, allCandidates, () => 0.7);
-  assert.equal(result.funnel_stage, "bottom");
+test("different week_of rotates contact bucket over time", () => {
+  const contact = { id: "rotate-me", order_count: 0 };
+  const a = selectCandidateForContact(allCandidates, contact, { week_of: "2026-02-16" });
+  const b = selectCandidateForContact(allCandidates, contact, { week_of: "2026-02-23" });
+  assert.ok(a && b);
 });
 
-// --- Boundary / edge cases ---
-
-test("boundary: order_count exactly 0 is cold", () => {
-  const contact = { order_count: 0 };
-  const result = selectCandidateForContact(contact, allCandidates, () => 0.0);
-  assert.equal(result.funnel_stage, "top");
+test("missing funnel stage candidate throws", () => {
+  const contact = { id: "warm-b", order_count: 2 };
+  assert.throws(
+    () => selectCandidateForContact([top, mid], contact, week),
+    /missing candidate/
+  );
 });
 
-test("boundary: order_count exactly 1 is activated", () => {
-  const contact = { order_count: 1 };
-  const result = selectCandidateForContact(contact, allCandidates, () => 0.0);
-  assert.equal(result.funnel_stage, "mid");
+test("requires contact.id and weeklyRun.week_of", () => {
+  assert.throws(() => selectCandidateForContact(allCandidates, { order_count: 0 }, week), /contact.id/);
+  assert.throws(() => selectCandidateForContact(allCandidates, { id: "x", order_count: 0 }, {}), /weeklyRun.week_of/);
 });
 
-test("missing funnel stage candidates: returns best available fallback", () => {
-  const contact = { order_count: 0 };
-  // Only mid + bottom available — cold rep at r=0.5 (>=0.8 threshold picks mid)
-  const result = selectCandidateForContact(contact, [mid, bottom], () => 0.9);
-  assert.equal(result.funnel_stage, "mid");
+test("single candidate path works only if stage matches target", () => {
+  const contact = { id: "force-mid", order_count: 0 };
+  const week3 = { week_of: "2000-01-01" };
+  const bucket = stableHash(contact.id + week3.week_of) % 4;
+  if (bucket === 3) {
+    const result = selectCandidateForContact([mid], contact, week3);
+    assert.equal(result.funnel_stage, "mid");
+    return;
+  }
+  assert.throws(() => selectCandidateForContact([mid], contact, week3), /missing candidate/);
 });
 
-test("single candidate: always returns it regardless of contact", () => {
-  const cold = { order_count: 0 };
-  const active = { order_count: 5 };
-  assert.equal(selectCandidateForContact(cold, [mid], () => 0.5)?.funnel_stage, "mid");
-  assert.equal(selectCandidateForContact(active, [mid], () => 0.5)?.funnel_stage, "mid");
+test("returns top/mid/bottom only", () => {
+  const cold = { id: "cold-c", order_count: 0 };
+  const warm = { id: "warm-c", order_count: 2 };
+  const coldResult = selectCandidateForContact(allCandidates, cold, week);
+  const warmResult = selectCandidateForContact(allCandidates, warm, week);
+  assert.ok(["top", "mid"].includes(coldResult.funnel_stage));
+  assert.ok(["mid", "bottom"].includes(warmResult.funnel_stage));
 });

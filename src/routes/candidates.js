@@ -44,6 +44,16 @@ export async function generateCandidatesForWeek(env, week_of, { force = false } 
     `).bind(run.id).run();
 
     await env.DB.prepare(`
+      DELETE FROM send_deliveries
+      WHERE weekly_run_id = ?
+    `).bind(run.id).run();
+
+    await env.DB.prepare(`
+      DELETE FROM run_log
+      WHERE weekly_run_id = ?
+    `).bind(run.id).run();
+
+    await env.DB.prepare(`
       DELETE FROM sends
       WHERE weekly_run_id = ?
     `).bind(run.id).run();

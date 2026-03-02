@@ -79,6 +79,11 @@ export async function handleDev(request, env) {
 
     // reset=1: wipe dependent rows + reset run fields
     if (reset) {
+      await env.DB.prepare(`DELETE FROM send_recipients WHERE send_id IN (SELECT id FROM sends WHERE weekly_run_id = ?)`)
+        .bind(run.id)
+        .run();
+      await env.DB.prepare(`DELETE FROM send_deliveries WHERE weekly_run_id = ?`).bind(run.id).run();
+      await env.DB.prepare(`DELETE FROM run_log WHERE weekly_run_id = ?`).bind(run.id).run();
       await env.DB.prepare(`DELETE FROM sends WHERE weekly_run_id = ?`).bind(run.id).run();
       await env.DB.prepare(`DELETE FROM candidates WHERE weekly_run_id = ?`).bind(run.id).run();
 
