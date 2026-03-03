@@ -1,0 +1,28 @@
+name = "ai-ops-agent"
+main = "src/index.js"
+compatibility_date = "2026-02-17"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai_ops_agent_db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "ASSETS_R2"
+bucket_name = "assets"
+preview_bucket_name = "assets"
+
+[vars]
+ENVIRONMENT = "dev"
+ASSET_BASE_URL = "https://assets.example.com/"
+TIMEZONE = "America/Chicago"
+SCHEDULE_GENERATE_DOW = "FRIDAY"
+SCHEDULE_GENERATE_TIME = "09:00"
+SCHEDULE_LOCK_DOW = "TUESDAY"
+SCHEDULE_LOCK_TIME = "09:45"
+SCHEDULE_SEND_DOW = "TUESDAY"
+SCHEDULE_SEND_TIME = "10:00"
+DRY_RUN = "true"
+
+[triggers]
+crons = ["*/5 * * * *"]

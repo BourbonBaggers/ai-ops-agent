@@ -18,3 +18,5 @@ DRY_RUN=false
 # real R2 asset allowlist when the local R2 bucket is empty.
 # Example: ASSETS_WORKER_URL=https://ai-ops-agent.<your-subdomain>.workers.dev
 ASSETS_WORKER_URL=
+# URL embedded in the email template footer (asset library link shown to recipients).
+ASSET_LIBRARY_URL=https://assets.example.com

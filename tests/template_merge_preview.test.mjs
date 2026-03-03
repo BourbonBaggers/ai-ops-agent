@@ -17,7 +17,7 @@ test("template merge replaces body/preview tokens and handles null image_url", (
   `;
 
   const candidate = {
-    subject: "Weekly rep note",
+    subject: "Weekly update",
     preview: "This is preview text",
     body_html: "<p>Body fragment here.</p>",
     body_text: "Body fragment here.",
@@ -32,7 +32,7 @@ test("template merge replaces body/preview tokens and handles null image_url", (
   assert.ok(!html.includes("{{BODY_HTML}}"));
   assert.ok(!html.includes("{{PREVIEW_TEXT}}"));
   assert.ok(html.includes("<p>Body fragment here.</p>"));
-  assert.ok(html.includes("https://assets.boozebaggers.com"));
+  assert.ok(html.includes("https://assets.example.com"));
   assert.ok(!html.includes("{{IMAGE_URL}}"));
   assert.ok(!/src\s*=\s*""/i.test(html));
   assert.ok(!/src\s*=\s*''/i.test(html));
@@ -54,7 +54,7 @@ test("template merge injects ACTION_TITLE, QUOTE_LINE, RALLY_LINE, CTA_TEXT", ()
     body_html: "<p>Body.</p>",
     action_line: "Put it into action with 3 accounts.",
     quote_text: "This one sells itself.",
-    rally_line: "No liquor license required.",
+    rally_line: "Low effort. High perceived value.",
     cta: "Reply for more info",
     image_url: null,
   };
@@ -63,7 +63,7 @@ test("template merge injects ACTION_TITLE, QUOTE_LINE, RALLY_LINE, CTA_TEXT", ()
 
   assert.ok(html.includes("Put it into action with 3 accounts."), "ACTION_TITLE not injected");
   assert.ok(html.includes("This one sells itself."), "QUOTE_LINE not injected");
-  assert.ok(html.includes("No liquor license required."), "RALLY_LINE not injected");
+  assert.ok(html.includes("Low effort. High perceived value."), "RALLY_LINE not injected");
   assert.ok(html.includes("Reply for more info"), "CTA_TEXT not injected");
   assert.ok(!html.includes("{{ACTION_TITLE}}"), "ACTION_TITLE token not replaced");
   assert.ok(!html.includes("{{QUOTE_LINE}}"), "QUOTE_LINE token not replaced");

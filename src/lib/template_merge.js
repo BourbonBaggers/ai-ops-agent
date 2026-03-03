@@ -1,4 +1,4 @@
-const DEFAULT_ASSET_LIBRARY_URL = "https://assets.boozebaggers.com";
+const DEFAULT_ASSET_LIBRARY_URL = "https://assets.example.com";
 const DEFAULT_UNSUBSCRIBE_LINK = "%%unsubscribe%%";
 const DEFAULT_ACTION_TITLE = "Put it into action...";
 

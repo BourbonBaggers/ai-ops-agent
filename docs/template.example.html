@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>{{subject}}</title>
+    <style>
+      body { margin:0 !important; padding:0 !important; background:#f3f6fa; }
+      table { border-collapse:collapse; }
+      img { display:block; border:0; outline:none; text-decoration:none; max-width:100%; height:auto; }
+      .container { width:100%; max-width:600px; }
+      .card { background:#ffffff; border-radius:8px; overflow:hidden; }
+      .padded { padding:20px; }
+      .headline { font-family:Arial, Helvetica, sans-serif; font-size:22px; line-height:1.35; color:#111827; margin:0 0 12px 0; }
+      .text { font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#111827; }
+      .label { font-family:Arial, Helvetica, sans-serif; font-size:12px; letter-spacing:.03em; text-transform:uppercase; color:#6b7280; margin:0 0 6px 0; }
+      .quote { font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.6; color:#111827; font-style:italic; margin:0; }
+      .btn { font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:700; color:#ffffff !important; text-decoration:none; background:#111827; border-radius:6px; padding:12px 16px; display:inline-block; }
+      .muted { font-family:Arial, Helvetica, sans-serif; font-size:12px; line-height:1.5; color:#6b7280; }
+    </style>
+  </head>
+  <body>
+    <div style="display:none !important; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all;">
+      {{preview_text}}
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f6fa;">
+      <tr>
+        <td align="center" style="padding:20px 10px;">
+          <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0">
+            <tr>
+              <td class="card">
+                {{#if image_url}}
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td>
+                      <a href="{{cta_url}}" style="text-decoration:none;">
+                        <img src="{{image_url}}" alt="{{image_alt}}" width="600" style="width:100%; max-width:600px;" />
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+                {{/if}}
+
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td class="padded">
+                      <h1 class="headline">{{headline}}</h1>
+                      <div class="text">{{body_html}}</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="padded" style="border-top:1px solid #e5e7eb;">
+                      <p class="label">Put it into action</p>
+                      <p class="text" style="margin:0 0 12px 0;">{{ACTION_TITLE}}</p>
+                      <p class="label">Rep line to use</p>
+                      <p class="quote">"{{QUOTE_LINE}}"</p>
+                      <p class="text" style="margin:14px 0 0 0;">{{RALLY_LINE}}</p>
+                      <p class="text" style="margin:10px 0 16px 0; font-weight:700;">{{CTA_TEXT}}</p>
+                      <a class="btn" href="{{cta_url}}" target="_blank">View Assets</a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="padded" style="border-top:1px solid #e5e7eb;">
+                      <p class="muted" style="margin:0 0 8px 0;">
+                        Asset library: <a href="{{ASSET_LIBRARY_URL}}" target="_blank">{{ASSET_LIBRARY_URL}}</a>
+                      </p>
+                      <p class="muted" style="margin:0;">
+                        <a href="{{unsubscribe_url}}" target="_blank">Unsubscribe</a>
+                        |
+                        <a href="{{manage_prefs_url}}" target="_blank">Manage preferences</a>
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

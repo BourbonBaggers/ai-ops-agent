@@ -145,6 +145,7 @@ vite.config.ts.timestamp-*
 # wrangler
 .wrangler/
 wrangler.toml
+!wrangler.toml.example
 
 # Local-only seed data (contains personal emails)
 seeds/dev_seed.sql
@@ -152,3 +153,4 @@ docs/policy.md
 docs/calendar.csv
 docs/template.md
 docs/template.html
+!docs/template.example.html

@@ -7,7 +7,7 @@ import { mergeCandidateIntoTemplate } from "../src/lib/template_merge.js";
 
 const TEMPLATE_PATH = path.resolve(process.cwd(), "docs/template.html");
 const DOWNLOADS_DIR = path.join(os.homedir(), "Downloads");
-const ASSET_LIBRARY_URL = "https://assets.boozebaggers.com";
+const ASSET_LIBRARY_URL = process.env.ASSET_LIBRARY_URL || "https://assets.example.com";
 const UNSUBSCRIBE_LINK = "%%unsubscribe%%";
 
 const args = parseArgs(process.argv.slice(2));
