@@ -84,6 +84,7 @@ test("sendWeeklyRun writes send_deliveries and run_log with idempotent rerun", a
   assert.equal(log1.attempted, 4);
   assert.equal(log1.sent_success, 4);
   assert.equal(log1.failed, 0);
+  assert.equal(log1.dry_run_count, 0);
   assert.equal(log1.skipped_already_sent, 0);
 
   const didSendSecond = await sendWeeklyRun(env, run, "2026-02-16T10:00:00.000Z");
@@ -97,7 +98,99 @@ test("sendWeeklyRun writes send_deliveries and run_log with idempotent rerun", a
   assert.equal(log2.attempted, 0);
   assert.equal(log2.sent_success, 0);
   assert.equal(log2.failed, 0);
+  assert.equal(log2.dry_run_count, 0);
   assert.equal(log2.skipped_already_sent, 4);
+});
+
+test("sendWeeklyRun dry run writes dry_run deliveries and skips graph", async () => {
+  const db = new MockD1({
+    weekly_runs: [
+      {
+        id: "run-2",
+        week_of: "2026-02-23",
+        locked_at: "2026-02-23T00:00:00.000Z",
+        selected_candidate_id: "cand-top2",
+        status: "locked",
+      },
+    ],
+    candidates: [
+      {
+        id: "cand-top2",
+        weekly_run_id: "run-2",
+        rank: 1,
+        funnel_stage: "top",
+        subject: "Top Subject",
+        preview_text: "Top preview",
+        body_markdown: "Top body",
+        body_html: "<p>Top body</p>",
+        body_text: "Top body",
+      },
+      {
+        id: "cand-mid2",
+        weekly_run_id: "run-2",
+        rank: 2,
+        funnel_stage: "mid",
+        subject: "Mid Subject",
+        preview_text: "Mid preview",
+        body_markdown: "Mid body",
+        body_html: "<p>Mid body</p>",
+        body_text: "Mid body",
+      },
+      {
+        id: "cand-bottom2",
+        weekly_run_id: "run-2",
+        rank: 3,
+        funnel_stage: "bottom",
+        subject: "Bottom Subject",
+        preview_text: "Bottom preview",
+        body_markdown: "Bottom body",
+        body_html: "<p>Bottom body</p>",
+        body_text: "Bottom body",
+      },
+    ],
+    contacts: [
+      { id: "d1", email: "d1@example.com", order_count: 0, status: "active" },
+      { id: "d2", email: "d2@example.com", order_count: 0, status: "active" },
+      { id: "d3", email: "d3@example.com", order_count: 3, status: "active" },
+      { id: "d4", email: "d4@example.com", order_count: 4, status: "active" },
+    ],
+  });
+
+  let graphCalls = 0;
+  const env = {
+    DB: db,
+    ENVIRONMENT: "dev",
+    DRY_RUN: "true",
+    GRAPH_SENDER_EMAIL: "sender@example.com",
+    REPLY_TO: "reply@example.com",
+    GRAPH_SEND_IMPL: async () => {
+      graphCalls++;
+      return { status: 202 };
+    },
+  };
+
+  const run = db.tables.weekly_runs[0];
+  const first = await sendWeeklyRun(env, run, "2026-02-23T10:00:00.000Z");
+  assert.equal(first, false);
+  assert.equal(graphCalls, 0);
+  assert.equal(db.tables.send_deliveries.length, 4);
+  assert.ok(db.tables.send_deliveries.every((d) => d.status === "dry_run"));
+  assert.equal(db.tables.run_log.length, 1);
+  assert.equal(db.tables.run_log[0].dry_run, 1);
+  assert.equal(db.tables.run_log[0].dry_run_count, 4);
+  assert.equal(db.tables.run_log[0].attempted, 4);
+  assert.equal(db.tables.run_log[0].sent_success, 0);
+  assert.equal(db.tables.run_log[0].failed, 0);
+
+  const second = await sendWeeklyRun(env, run, "2026-02-23T10:00:00.000Z");
+  assert.equal(second, false);
+  assert.equal(graphCalls, 0);
+  assert.equal(db.tables.send_deliveries.length, 4);
+  assert.equal(db.tables.run_log.length, 2);
+  assert.equal(db.tables.run_log[1].dry_run, 1);
+  assert.equal(db.tables.run_log[1].dry_run_count, 0);
+  assert.equal(db.tables.run_log[1].attempted, 0);
+  assert.equal(db.tables.run_log[1].skipped_already_sent, 4);
 });
 
 class MockD1 {
@@ -216,6 +309,16 @@ class MockStmt {
       }
       return { meta: { changes: row ? 1 : 0 } };
     }
+    if (q.startsWith("UPDATE SEND_DELIVERIES SET STATUS = 'DRY_RUN'")) {
+      const [id] = this.args;
+      const row = t.send_deliveries.find((d) => d.id === id);
+      if (row) {
+        row.status = "dry_run";
+        row.graph_status = null;
+        row.error = null;
+      }
+      return { meta: { changes: row ? 1 : 0 } };
+    }
     if (q.startsWith("UPDATE SEND_DELIVERIES SET STATUS = 'FAILED'")) {
       const [error, id] = this.args;
       const row = t.send_deliveries.find((d) => d.id === id);
@@ -251,11 +354,13 @@ class MockStmt {
         weekly_run_id,
         started_at,
         finished_at,
+        dry_run,
         contacts_total,
         attempted,
         sent_success,
         failed,
         skipped_already_sent,
+        dry_run_count,
         top_count,
         mid_count,
         bottom_count,
@@ -267,12 +372,13 @@ class MockStmt {
         weekly_run_id,
         started_at,
         finished_at,
-        dry_run: 0,
+        dry_run,
         contacts_total,
         attempted,
         sent_success,
         failed,
         skipped_already_sent,
+        dry_run_count,
         top_count,
         mid_count,
         bottom_count,

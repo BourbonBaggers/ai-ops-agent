@@ -143,6 +143,7 @@ export async function lockWeeklyRun(env, run, nowZ) {
 
 export async function sendWeeklyRun(env, run, nowZ) {
   const startedAt = nowZ || nowUtcIso();
+  const dryRun = isDryRun(env);
 
   // If not locked yet, lock it right now (enforces “auto-authorized”)
   if (run && !run.locked_at) {
@@ -220,6 +221,7 @@ export async function sendWeeklyRun(env, run, nowZ) {
     attempted: 0,
     sent_success: 0,
     failed: 0,
+    dry_run_count: 0,
     skipped_already_sent: 0,
     top_count: 0,
     mid_count: 0,
@@ -322,6 +324,21 @@ export async function sendWeeklyRun(env, run, nowZ) {
         )}</pre>`;
     const candidateBodyText = (candidate.body_text || candidate.body_markdown || "").replace(/\r\n/g, "\n");
 
+    if (dryRun) {
+      await env.DB.prepare(`
+        UPDATE send_deliveries
+        SET status = 'dry_run',
+            graph_status = NULL,
+            error = NULL
+        WHERE id = ?
+      `).bind(deliveryId).run();
+      summary.dry_run_count += 1;
+      if (summary.sample.length < 10) {
+        summary.sample.push({ contact_id: contact.id, status: "dry_run", funnel_stage: stage });
+      }
+      continue;
+    }
+
     try {
       const result = await sendMail(env, {
         fromUpn: senderMailbox,
@@ -375,18 +392,20 @@ export async function sendWeeklyRun(env, run, nowZ) {
     INSERT INTO run_log (
       id, weekly_run_id, started_at, finished_at, dry_run,
       contacts_total, attempted, sent_success, failed, skipped_already_sent,
-      top_count, mid_count, bottom_count, error_rollup_json, sample_json
-    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      dry_run_count, top_count, mid_count, bottom_count, error_rollup_json, sample_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     crypto.randomUUID(),
     run.id,
     startedAt,
     finishedAt,
+    dryRun ? 1 : 0,
     summary.contacts_total,
     summary.attempted,
     summary.sent_success,
     summary.failed,
     summary.skipped_already_sent,
+    summary.dry_run_count,
     summary.top_count,
     summary.mid_count,
     summary.bottom_count,
@@ -395,19 +414,21 @@ export async function sendWeeklyRun(env, run, nowZ) {
   ).run();
 
   console.log("[sendWeeklyRun] batch_summary", JSON.stringify({
+    stage: "send",
     weekly_run_id: run.id,
     week_of: run.week_of,
-    started_at: startedAt,
-    finished_at: finishedAt,
-    dry_run: 0,
+    dry_run: dryRun,
     contacts_total: summary.contacts_total,
     attempted: summary.attempted,
+    dry_run_count: summary.dry_run_count,
+    skipped_already_sent: summary.skipped_already_sent,
     sent_success: summary.sent_success,
     failed: summary.failed,
-    skipped_already_sent: summary.skipped_already_sent,
-    top_count: summary.top_count,
-    mid_count: summary.mid_count,
-    bottom_count: summary.bottom_count,
+    by_funnel: {
+      top: summary.top_count,
+      mid: summary.mid_count,
+      bottom: summary.bottom_count,
+    },
     error_rollup: errorRollup,
     sample: summary.sample,
   }));
@@ -431,4 +452,11 @@ function buildErrorRollup(errors) {
     byMessage[key] = (byMessage[key] || 0) + 1;
   }
   return { total: errors?.length || 0, by_message: byMessage };
+}
+
+export function isDryRun(env) {
+  const raw = env?.DRY_RUN;
+  if (raw === true) return true;
+  const v = String(raw ?? "").trim().toLowerCase();
+  return v === "1" || v === "true";
 }
