@@ -148,6 +148,7 @@ wrangler.toml
 
 # Local-only seed data (contains personal emails)
 seeds/dev_seed.sql
+seeds/prod_seed_*.sql
 docs/policy.md
 docs/calendar.csv
 docs/template.md

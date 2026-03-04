@@ -26,8 +26,10 @@ export async function handleRequest(request, env) {
       typeof handleHealth
     );
 
-
-    if (pathname .startsWith("/dev/email")){
+    if (pathname.startsWith("/dev/email")) {
+      if ((env.ENVIRONMENT || "").toLowerCase() !== "dev") {
+        return json({ status: "error", message: "Not found" }, 404);
+      }
       return await handleDevEmail(request, env);
     }
 

@@ -11,6 +11,9 @@ export async function handleDev(request, env) {
   const method = request.method.toUpperCase();
 
   if (!path.startsWith("/dev/")) return null;
+  if ((env.ENVIRONMENT || "").toLowerCase() !== "dev") {
+    return json({ status: "error", message: "Not found" }, 404);
+  }
 
   const settings = loadSettings(env);
   const tz = settings.timezone;
