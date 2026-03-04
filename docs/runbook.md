@@ -33,7 +33,7 @@ wrangler d1 migrations apply <db_name> --local
 ```
 2. Start Worker locally:
 ```bash
-wrangler dev
+npm run dev
 ```
 3. Health check:
 ```bash
@@ -85,7 +85,13 @@ curl -s -X POST http://127.0.0.1:8787/admin/candidates/select \
 ```dotenv
 DRY_RUN=true
 ```
+or use one-off override startup:
+```bash
+npm run dev:dry-run
+```
 2. Run send stage via `/dev/run` or `/jobs/tick`.
+  - `npm run dev` uses `127.0.0.1:8787`
+  - `npm run dev:dry-run` uses `127.0.0.1:8788`
 3. Expected behavior:
 - No Microsoft Graph API calls.
 - `send_deliveries.status = "dry_run"` for newly attempted rows.
@@ -123,3 +129,4 @@ wrangler d1 execute <db_name> --local --command "SELECT weekly_run_id, dry_run, 
 
 ## Notes
 - Route and response labels may still contain legacy wording like `sent_stub` in some dev responses; operational behavior is governed by the actual send path in `src/routes/jobs.js`.
+- In dry-run mode, use port `8788` in curl commands (for example: `http://127.0.0.1:8788/dev/run?...`).

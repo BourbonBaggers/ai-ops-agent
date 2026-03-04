@@ -13,10 +13,14 @@ const UNSUBSCRIBE_LINK = "%%unsubscribe%%";
 const args = parseArgs(process.argv.slice(2));
 const outputDir = args.output_dir || DOWNLOADS_DIR;
 const templateHtml = await fs.readFile(TEMPLATE_PATH, "utf8");
+const policyText = await loadPolicyText();
 
 const provider = new OpenAIProvider({
+  apiKey: process.env.OPEN_AI_KEY,
+  model: process.env.OPENAI_MODEL,
   baseUrl: args.base_url || process.env.BASE_URL,
   assetsBaseUrl: args.assets_base_url || process.env.ASSETS_WORKER_URL || null,
+  policyText,
 });
 
 const candidates = await provider.generateCandidates({
@@ -113,5 +117,15 @@ async function resolveUniquePath(dir, fileName) {
     return path.join(dir, `${base}_${crypto.randomBytes(2).toString("hex")}${ext}`);
   } catch {
     return target;
+  }
+}
+
+async function loadPolicyText() {
+  const primary = path.resolve(process.cwd(), "docs/policy.md");
+  const fallback = path.resolve(process.cwd(), "docs/policy.example.md");
+  try {
+    return await fs.readFile(primary, "utf8");
+  } catch {
+    return fs.readFile(fallback, "utf8");
   }
 }

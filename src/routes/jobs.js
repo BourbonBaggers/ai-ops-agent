@@ -171,7 +171,7 @@ export async function sendWeeklyRun(env, run, nowZ) {
   }
 
   const candidateRows = await env.DB.prepare(`
-    SELECT id, funnel_stage, subject, preview_text, body_markdown, body_html, body_text
+    SELECT id, funnel_stage, subject, preview_text, body_markdown, body_html
     FROM candidates
     WHERE weekly_run_id = ?
     ORDER BY rank ASC
@@ -244,7 +244,7 @@ export async function sendWeeklyRun(env, run, nowZ) {
         : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
             selectedForContact.body_markdown || ""
           )}</pre>`;
-      const bodyText = (selectedForContact.body_text || selectedForContact.body_markdown || "").replace(/\r\n/g, "\n");
+      const bodyText = (selectedForContact.body_markdown || "").replace(/\r\n/g, "\n");
       const sendId = crypto.randomUUID();
 
       const insert = await env.DB.prepare(`
@@ -322,7 +322,7 @@ export async function sendWeeklyRun(env, run, nowZ) {
       : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
           candidate.body_markdown || ""
         )}</pre>`;
-    const candidateBodyText = (candidate.body_text || candidate.body_markdown || "").replace(/\r\n/g, "\n");
+    const candidateBodyText = (candidate.body_markdown || "").replace(/\r\n/g, "\n");
 
     if (dryRun) {
       await env.DB.prepare(`

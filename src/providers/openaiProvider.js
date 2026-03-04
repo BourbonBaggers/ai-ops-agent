@@ -1,23 +1,19 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
 const DEFAULT_BASE_URL = "http://127.0.0.1:8787";
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_POLICY_PATH = path.resolve(process.cwd(), "docs/policy.md");
 const DEFAULT_IMAGE_LIMIT = 150;
 
 export class OpenAIProvider {
   constructor({
-    apiKey = process.env.OPEN_AI_KEY,
-    model = process.env.OPENAI_MODEL || DEFAULT_MODEL,
+    apiKey = null,
+    model = DEFAULT_MODEL,
     openAiUrl = DEFAULT_OPENAI_URL,
-    baseUrl = process.env.BASE_URL || DEFAULT_BASE_URL,
+    baseUrl = DEFAULT_BASE_URL,
     imageCatalogPath = "/admin/email_images",
     imageLimit = DEFAULT_IMAGE_LIMIT,
     db = null,
     fetchImpl = fetch,
-    policyPath = DEFAULT_POLICY_PATH,
+    policyPath = null,
     policyText = null,
   } = {}) {
     this.apiKey = apiKey;
@@ -27,7 +23,7 @@ export class OpenAIProvider {
     this.imageCatalogPath = imageCatalogPath;
     this.imageLimit = imageLimit;
     this.db = db;
-    this.fetchImpl = fetchImpl;
+    this.fetchImpl = normalizeFetch(fetchImpl);
     this.policyPath = policyPath;
     this.policyText = policyText;
   }
@@ -116,7 +112,11 @@ export class OpenAIProvider {
     if (typeof input.policyText === "string") return input.policyText;
     if (typeof this.policyText === "string") return this.policyText;
     const policyPath = input.policyPath || this.policyPath;
-    return fs.readFile(policyPath, "utf8");
+    throw new Error(
+      `Policy text is required. Provide policyText directly${
+        policyPath ? ` (policyPath "${policyPath}" is not readable in Worker runtime)` : ""
+      }.`
+    );
   }
 
   async callOpenAI({ policy, allowlistedItems, variationHint }) {
@@ -180,6 +180,17 @@ export class OpenAIProvider {
 
     return content.trim();
   }
+}
+
+function normalizeFetch(fetchImpl) {
+  if (typeof fetchImpl === "function") {
+    // In Workers, calling a detached host function can throw "Illegal invocation".
+    return (url, init) => fetchImpl(url, init);
+  }
+  if (typeof fetch === "function") {
+    return (url, init) => fetch(url, init);
+  }
+  throw new Error("fetch implementation is required");
 }
 
 function parseStrictJson(rawText) {

@@ -1,10 +1,16 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { OpenAIProvider } from "../src/providers/openaiProvider.js";
 
 const args = parseArgs(process.argv.slice(2));
+const policyText = await loadPolicyText();
 
 const provider = new OpenAIProvider({
+  apiKey: process.env.OPEN_AI_KEY,
+  model: process.env.OPENAI_MODEL,
   baseUrl: args.base_url || process.env.BASE_URL,
   assetsBaseUrl: args.assets_base_url || process.env.ASSETS_WORKER_URL || null,
+  policyText,
 });
 
 try {
@@ -49,4 +55,14 @@ function parseArgs(argv) {
     }
   }
   return parsed;
+}
+
+async function loadPolicyText() {
+  const primary = path.resolve(process.cwd(), "docs/policy.md");
+  const fallback = path.resolve(process.cwd(), "docs/policy.example.md");
+  try {
+    return await fs.readFile(primary, "utf8");
+  } catch {
+    return fs.readFile(fallback, "utf8");
+  }
 }

@@ -247,7 +247,7 @@ class MockStmt {
     const q = normalize(this.sql);
     const t = this.db.tables;
 
-    if (q.includes("SELECT ID, FUNNEL_STAGE, SUBJECT, PREVIEW_TEXT, BODY_MARKDOWN, BODY_HTML, BODY_TEXT FROM CANDIDATES WHERE WEEKLY_RUN_ID = ? ORDER BY RANK ASC")) {
+    if (q.includes("SELECT ID, FUNNEL_STAGE, SUBJECT, PREVIEW_TEXT, BODY_MARKDOWN, BODY_HTML FROM CANDIDATES WHERE WEEKLY_RUN_ID = ? ORDER BY RANK ASC")) {
       const weeklyRunId = this.args[0];
       const results = t.candidates
         .filter((c) => c.weekly_run_id === weeklyRunId)
@@ -259,7 +259,6 @@ class MockStmt {
           preview_text: c.preview_text,
           body_markdown: c.body_markdown,
           body_html: c.body_html,
-          body_text: c.body_text,
         }));
       return { results };
     }
