@@ -13,6 +13,7 @@ import { handleAssets } from "./routes/assets.js";
 import { handleEmailImages } from "./routes/email_images.js";
 import { json } from "./lib/utils.js";
 import { handleDevEmail } from "./routes/dev_email.js";
+import { handleAdminUi } from "./routes/admin_ui.js";
 
 export async function handleRequest(request, env) {
   try {
@@ -45,6 +46,10 @@ export async function handleRequest(request, env) {
     }
 
     // Admin
+    if (pathname.startsWith("/admin/ui")) {
+      return await handleAdminUi(request, env);
+    }
+
     if (pathname.startsWith("/admin/sends")) {
       return await handleAdminSends(request, env);
     }
