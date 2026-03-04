@@ -4,6 +4,8 @@ import { loadSettings } from "../lib/settings.js";
 import { generateCandidatesForWeek } from "./candidates.js";
 import { selectCandidateForContact } from "../lib/segmentation.js";
 import { graphSendMail } from "../lib/ms_graph.js";
+import { mergeCandidateIntoTemplate } from "../lib/template_merge.js";
+import { DEFAULT_EMAIL_TEMPLATE } from "../lib/default_email_template.js";
 
 
 export async function handleJobs(request, env) {
@@ -144,6 +146,7 @@ export async function lockWeeklyRun(env, run, nowZ) {
 export async function sendWeeklyRun(env, run, nowZ) {
   const startedAt = nowZ || nowUtcIso();
   const dryRun = isDryRun(env);
+  const templateHtml = await resolveTemplateHtml(env);
 
   // If not locked yet, lock it right now (enforces “auto-authorized”)
   if (run && !run.locked_at) {
@@ -171,7 +174,7 @@ export async function sendWeeklyRun(env, run, nowZ) {
   }
 
   const candidateRows = await env.DB.prepare(`
-    SELECT id, funnel_stage, subject, preview_text, body_markdown, body_html
+    SELECT id, funnel_stage, subject, preview_text, body_markdown, body_html, image_url, action_line, quote_text, rally_line
     FROM candidates
     WHERE weekly_run_id = ?
     ORDER BY rank ASC
@@ -208,7 +211,7 @@ export async function sendWeeklyRun(env, run, nowZ) {
   }
 
   const sendRows = await env.DB.prepare(`
-    SELECT id, candidate_id
+    SELECT id, candidate_id, subject, preview_text, body_html, body_text
     FROM sends
     WHERE weekly_run_id = ?
   `).bind(run.id).all();
@@ -239,11 +242,11 @@ export async function sendWeeklyRun(env, run, nowZ) {
 
     let send = sendByCandidateId.get(selectedForContact.id);
     if (!send) {
-      const bodyHtml = selectedForContact.body_html?.trim()
-        ? selectedForContact.body_html
-        : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
-            selectedForContact.body_markdown || ""
-          )}</pre>`;
+      const merged = mergeCandidateIntoTemplate(templateHtml, selectedForContact, {
+        assetLibraryUrl: env.ASSET_LIBRARY_URL || "https://assets.boozebaggers.com",
+        unsubscribeLink: "%%unsubscribe%%",
+      });
+      const bodyHtml = ensurePreheader(merged, selectedForContact.preview_text);
       const bodyText = (selectedForContact.body_markdown || "").replace(/\r\n/g, "\n");
       const sendId = crypto.randomUUID();
 
@@ -270,13 +273,20 @@ export async function sendWeeklyRun(env, run, nowZ) {
       const didInsert = (insert?.meta?.changes ?? 0) > 0;
       if (!didInsert) {
         send = await env.DB.prepare(`
-          SELECT id, candidate_id
+          SELECT id, candidate_id, subject, preview_text, body_html, body_text
           FROM sends
           WHERE weekly_run_id = ? AND candidate_id = ?
           LIMIT 1
         `).bind(run.id, selectedForContact.id).first();
       } else {
-        send = { id: sendId, candidate_id: selectedForContact.id };
+        send = {
+          id: sendId,
+          candidate_id: selectedForContact.id,
+          subject: selectedForContact.subject,
+          preview_text: selectedForContact.preview_text,
+          body_html: bodyHtml,
+          body_text: bodyText,
+        };
       }
 
       sendByCandidateId.set(selectedForContact.id, send);
@@ -317,12 +327,16 @@ export async function sendWeeklyRun(env, run, nowZ) {
     summary.attempted += 1;
 
     const candidate = candidateById.get(selectedForContact.id) || selectedForContact;
-    const candidateBodyHtml = candidate.body_html?.trim()
-      ? candidate.body_html
-      : `<pre style="white-space:pre-wrap;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif">${escapeHtml(
-          candidate.body_markdown || ""
-        )}</pre>`;
-    const candidateBodyText = (candidate.body_markdown || "").replace(/\r\n/g, "\n");
+    const candidateBodyHtml = send.body_html?.trim()
+      ? send.body_html
+      : ensurePreheader(
+          mergeCandidateIntoTemplate(templateHtml, candidate, {
+            assetLibraryUrl: env.ASSET_LIBRARY_URL || "https://assets.boozebaggers.com",
+            unsubscribeLink: "%%unsubscribe%%",
+          }),
+          candidate.preview_text
+        );
+    const candidateBodyText = (send.body_text || candidate.body_markdown || "").replace(/\r\n/g, "\n");
 
     if (dryRun) {
       await env.DB.prepare(`
@@ -434,6 +448,46 @@ export async function sendWeeklyRun(env, run, nowZ) {
   }));
 
   return summary.sent_success > 0;
+}
+
+async function resolveTemplateHtml(env) {
+  const raw = env?.EMAIL_TEMPLATE_HTML;
+  if (typeof raw === "string" && raw.trim()) return raw;
+
+  try {
+    const row = await env.DB.prepare(`
+      SELECT value_json
+      FROM config
+      WHERE key = 'email_template_html'
+      LIMIT 1
+    `).first();
+
+    if (row?.value_json) {
+      const parsed = JSON.parse(row.value_json);
+      if (typeof parsed === "string" && parsed.trim()) return parsed;
+      if (parsed && typeof parsed.html === "string" && parsed.html.trim()) return parsed.html;
+    }
+  } catch {
+    // Fall back to default template if config table/key is unavailable.
+  }
+
+  return DEFAULT_EMAIL_TEMPLATE;
+}
+
+function ensurePreheader(html, previewText) {
+  if (typeof html !== "string") return html;
+  const preview = String(previewText ?? "").trim();
+  if (!preview) return html;
+  if (html.includes(preview)) return html;
+
+  const escaped = escapeHtml(preview);
+  const block =
+    `<div style="display:none!important;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escaped}</div>`;
+
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body([^>]*)>/i, `<body$1>${block}`);
+  }
+  return `${block}${html}`;
 }
 
 function escapeHtml(s) {

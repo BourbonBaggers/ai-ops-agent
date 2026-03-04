@@ -202,6 +202,7 @@ class MockD1 {
       sends: seed.sends ? seed.sends.map(clone) : [],
       send_deliveries: seed.send_deliveries ? seed.send_deliveries.map(clone) : [],
       run_log: seed.run_log ? seed.run_log.map(clone) : [],
+      config: seed.config ? seed.config.map(clone) : [],
     };
   }
 
@@ -229,7 +230,7 @@ class MockStmt {
     if (q.includes("SELECT * FROM WEEKLY_RUNS WHERE ID = ?")) {
       return t.weekly_runs.find((r) => r.id === this.args[0]) || null;
     }
-    if (q.includes("SELECT ID, CANDIDATE_ID FROM SENDS WHERE WEEKLY_RUN_ID = ? AND CANDIDATE_ID = ? LIMIT 1")) {
+    if (q.includes("SELECT ID, CANDIDATE_ID, SUBJECT, PREVIEW_TEXT, BODY_HTML, BODY_TEXT FROM SENDS WHERE WEEKLY_RUN_ID = ? AND CANDIDATE_ID = ? LIMIT 1")) {
       return t.sends.find((s) => s.weekly_run_id === this.args[0] && s.candidate_id === this.args[1]) || null;
     }
     if (q.includes("SELECT ID, STATUS FROM SEND_DELIVERIES WHERE SEND_ID = ? AND CONTACT_ID = ? LIMIT 1")) {
@@ -239,6 +240,9 @@ class MockStmt {
       const row = t.candidates.find((c) => c.weekly_run_id === this.args[0] && c.rank === 1);
       return row ? { id: row.id } : null;
     }
+    if (q.includes("SELECT VALUE_JSON FROM CONFIG WHERE KEY = 'EMAIL_TEMPLATE_HTML' LIMIT 1")) {
+      return t.config.find((c) => c.key === "email_template_html") || null;
+    }
 
     throw new Error(`Unsupported first SQL: ${this.sql}`);
   }
@@ -247,7 +251,7 @@ class MockStmt {
     const q = normalize(this.sql);
     const t = this.db.tables;
 
-    if (q.includes("SELECT ID, FUNNEL_STAGE, SUBJECT, PREVIEW_TEXT, BODY_MARKDOWN, BODY_HTML FROM CANDIDATES WHERE WEEKLY_RUN_ID = ? ORDER BY RANK ASC")) {
+    if (q.includes("SELECT ID, FUNNEL_STAGE, SUBJECT, PREVIEW_TEXT, BODY_MARKDOWN, BODY_HTML, IMAGE_URL, ACTION_LINE, QUOTE_TEXT, RALLY_LINE FROM CANDIDATES WHERE WEEKLY_RUN_ID = ? ORDER BY RANK ASC")) {
       const weeklyRunId = this.args[0];
       const results = t.candidates
         .filter((c) => c.weekly_run_id === weeklyRunId)
@@ -259,6 +263,10 @@ class MockStmt {
           preview_text: c.preview_text,
           body_markdown: c.body_markdown,
           body_html: c.body_html,
+          image_url: c.image_url ?? null,
+          action_line: c.action_line ?? null,
+          quote_text: c.quote_text ?? null,
+          rally_line: c.rally_line ?? null,
         }));
       return { results };
     }
@@ -269,9 +277,20 @@ class MockStmt {
         .map((c) => ({ id: c.id, email: c.email, order_count: c.order_count }));
       return { results };
     }
-    if (q.includes("SELECT ID, CANDIDATE_ID FROM SENDS WHERE WEEKLY_RUN_ID = ?")) {
+    if (q.includes("SELECT ID, CANDIDATE_ID, SUBJECT, PREVIEW_TEXT, BODY_HTML, BODY_TEXT FROM SENDS WHERE WEEKLY_RUN_ID = ?")) {
       const weeklyRunId = this.args[0];
-      return { results: t.sends.filter((s) => s.weekly_run_id === weeklyRunId).map((s) => ({ id: s.id, candidate_id: s.candidate_id })) };
+      return {
+        results: t.sends
+          .filter((s) => s.weekly_run_id === weeklyRunId)
+          .map((s) => ({
+            id: s.id,
+            candidate_id: s.candidate_id,
+            subject: s.subject,
+            preview_text: s.preview_text,
+            body_html: s.body_html,
+            body_text: s.body_text,
+          })),
+      };
     }
 
     throw new Error(`Unsupported all SQL: ${this.sql}`);
