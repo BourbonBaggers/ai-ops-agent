@@ -1,5 +1,5 @@
 import { json, normalizePath } from "../lib/utils.js";
-import { nowUtcIso, nowInTzISO, getWeekOf } from "../lib/time.js";
+import { nowUtcIso, nowInTzISO, sendWeekOf } from "../lib/time.js";
 import { loadSettings } from "../lib/settings.js";
 
 import { ensureWeeklyRun, lockWeeklyRun, sendWeeklyRun } from "./jobs.js";
@@ -21,7 +21,7 @@ export async function handleDev(request, env) {
   // GET /dev/ping
   if (path === "/dev/ping" && method === "GET") {
     const now_local = nowInTzISO(tz);
-    const week_of = getWeekOf(tz);
+    const week_of = sendWeekOf(tz, new Date(), settings.schedule.send.dow);
     return json({ status: "ok", now: now_local, tz, week_of });
   }
 
@@ -30,7 +30,7 @@ export async function handleDev(request, env) {
     const now_utc = nowUtcIso();      // single source of truth for DB timestamps
     const now_local = nowInTzISO(tz); // for response/debugging only
 
-    // week_of can come from querystring, JSON body, or default to current week
+    // week_of can come from querystring, JSON body, or default to the upcoming send week
     let body = {};
     try {
       body = await request.json();
@@ -41,7 +41,7 @@ export async function handleDev(request, env) {
     const week_of =
       url.searchParams.get("week_of") ||
       body.week_of ||
-      getWeekOf(tz);
+      sendWeekOf(tz, new Date(), settings.schedule.send.dow);
 
     const force =
       url.searchParams.get("force") === "1" ||

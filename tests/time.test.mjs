@@ -9,6 +9,8 @@ import {
   addDays,
   isYmd,
   utcDateStr,
+  sendWeekOf,
+  nextSendDateYmd,
 } from "../src/lib/time.js";
 
 // --- isYmd ---
@@ -112,6 +114,88 @@ test("getWeekOf: Monday returns that same Monday", () => {
 test("getWeekOf: Sunday returns the Monday that started the week", () => {
   const d = new Date("2026-02-22T20:00:00Z"); // Sun 14:00 CST
   assert.equal(getWeekOf("America/Chicago", d), "2026-02-16");
+});
+
+// --- sendWeekOf ---
+// The key invariant: Friday Mar 13 and Tuesday Mar 17 must both return "2026-03-16"
+// (the Monday of the send week) so they resolve to the same weekly_run row.
+
+// 2026-03-13T15:00:00Z = Friday 09:00 CST (UTC-6)
+test("sendWeekOf: Friday returns NEXT Monday (send week not current week)", () => {
+  const d = new Date("2026-03-13T15:00:00Z"); // Fri 09:00 CST
+  assert.equal(sendWeekOf("America/Chicago", d, "TUESDAY"), "2026-03-16");
+});
+
+// 2026-03-17T15:00:00Z = Tuesday 10:00 CDT (UTC-5, DST started Mar 8)
+test("sendWeekOf: Tuesday returns THIS Monday (same send week)", () => {
+  const d = new Date("2026-03-17T15:00:00Z"); // Tue 10:00 CDT
+  assert.equal(sendWeekOf("America/Chicago", d, "TUESDAY"), "2026-03-16");
+});
+
+// Monday is before Tuesday so it belongs to the same send week
+test("sendWeekOf: Monday returns THIS Monday (same send week)", () => {
+  const d = new Date("2026-03-16T15:00:00Z"); // Mon 10:00 CDT
+  assert.equal(sendWeekOf("America/Chicago", d, "TUESDAY"), "2026-03-16");
+});
+
+// Wednesday is past Tuesday so it targets next week's send
+test("sendWeekOf: Wednesday returns NEXT Monday (send day already passed)", () => {
+  const d = new Date("2026-03-18T15:00:00Z"); // Wed 10:00 CDT
+  assert.equal(sendWeekOf("America/Chicago", d, "TUESDAY"), "2026-03-23");
+});
+
+// Cross-week DST boundary: US DST starts 2026-03-08. Ensure Friday before DST still works.
+test("sendWeekOf: Friday before DST boundary returns correct next Monday", () => {
+  const d = new Date("2026-03-06T15:00:00Z"); // Fri 09:00 CST (DST starts Mar 8)
+  assert.equal(sendWeekOf("America/Chicago", d, "TUESDAY"), "2026-03-09");
+});
+
+// --- nextSendDateYmd ---
+
+test("nextSendDateYmd: Friday returns next Tuesday", () => {
+  const d = new Date("2026-03-13T15:00:00Z"); // Fri 09:00 CST
+  assert.equal(nextSendDateYmd("America/Chicago", d, "TUESDAY"), "2026-03-17");
+});
+
+test("nextSendDateYmd: Tuesday returns same Tuesday", () => {
+  const d = new Date("2026-03-17T15:00:00Z"); // Tue 10:00 CDT
+  assert.equal(nextSendDateYmd("America/Chicago", d, "TUESDAY"), "2026-03-17");
+});
+
+test("nextSendDateYmd: Monday returns the very next day (Tuesday)", () => {
+  const d = new Date("2026-03-16T15:00:00Z"); // Mon 10:00 CDT
+  assert.equal(nextSendDateYmd("America/Chicago", d, "TUESDAY"), "2026-03-17");
+});
+
+test("nextSendDateYmd: Wednesday returns the following Tuesday", () => {
+  const d = new Date("2026-03-18T15:00:00Z"); // Wed 10:00 CDT
+  assert.equal(nextSendDateYmd("America/Chicago", d, "TUESDAY"), "2026-03-24");
+});
+
+// --- sendWeekOf + nextSendDateYmd consistency ---
+// Core invariant: a Friday generate and the following Tuesday send must
+// resolve to the same week_of anchor, proving the bug is fixed.
+
+test("sendWeekOf consistency: Friday generate and following Tuesday send share same week_of", () => {
+  const friday = new Date("2026-03-13T15:00:00Z"); // Fri 09:00 CST
+  const tuesday = new Date("2026-03-17T15:00:00Z"); // Tue 10:00 CDT
+
+  const fridayWeekOf = sendWeekOf("America/Chicago", friday, "TUESDAY");
+  const tuesdayWeekOf = sendWeekOf("America/Chicago", tuesday, "TUESDAY");
+
+  assert.equal(fridayWeekOf, tuesdayWeekOf,
+    `Friday week_of (${fridayWeekOf}) must match Tuesday week_of (${tuesdayWeekOf})`);
+  assert.equal(fridayWeekOf, "2026-03-16");
+});
+
+test("nextSendDateYmd consistency: Friday and Monday both resolve to same Tuesday", () => {
+  const friday = new Date("2026-03-13T15:00:00Z");
+  const monday = new Date("2026-03-16T15:00:00Z");
+  const tuesday = new Date("2026-03-17T15:00:00Z");
+
+  assert.equal(nextSendDateYmd("America/Chicago", friday, "TUESDAY"), "2026-03-17");
+  assert.equal(nextSendDateYmd("America/Chicago", monday, "TUESDAY"), "2026-03-17");
+  assert.equal(nextSendDateYmd("America/Chicago", tuesday, "TUESDAY"), "2026-03-17");
 });
 
 // --- nowInTzISO ---

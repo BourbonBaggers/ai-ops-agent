@@ -1,5 +1,5 @@
 import { json, normalizePath } from "../lib/utils.js";
-import { nowUtcIso, nowInTzISO, getWeekOf, getPartsInTz } from "../lib/time.js";
+import { nowUtcIso, nowInTzISO, getPartsInTz, sendWeekOf, nextSendDateYmd } from "../lib/time.js";
 import { loadSettings } from "../lib/settings.js";
 import { generateCandidatesForWeek } from "./candidates.js";
 import { selectCandidateForContact } from "../lib/segmentation.js";
@@ -37,12 +37,17 @@ async function tick(request, env) {
   const nowUtc = now.toISOString();
   const nowLocal = nowInTzISO(tz, now);
 
-  const week_of = getWeekOf(tz, now);
   const { dow, hhmm } = getPartsInTz(now, tz);
+
+  // Always anchor to the *send* week's Monday so that Friday generation and
+  // the following Tuesday lock/send resolve to the same weekly_run row.
+  // e.g. Friday Mar 13 → week_of "2026-03-16"; Tuesday Mar 17 → "2026-03-16" ✓
+  const week_of = sendWeekOf(tz, now, schedule.send.dow);
+  const target_send_date = nextSendDateYmd(tz, now, schedule.send.dow);
 
   const actions = [];
 
-  await ensureWeeklyRun(env, week_of);
+  await ensureWeeklyRun(env, week_of, target_send_date);
 
   if (dow === schedule.generate.dow && hhmm === schedule.generate.time) {
     const res = await generateCandidatesForWeek(env, week_of, { force: false });
@@ -97,7 +102,7 @@ function getNowForTick(request, env) {
   return d;
 }
 
-export async function ensureWeeklyRun(env, week_of) {
+export async function ensureWeeklyRun(env, week_of, target_send_date = null) {
   let run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`)
     .bind(week_of)
     .first();
@@ -107,9 +112,9 @@ export async function ensureWeeklyRun(env, week_of) {
   const now = nowUtcIso();
 
   await env.DB.prepare(`
-    INSERT INTO weekly_runs (id, week_of, status, created_at, updated_at)
-    VALUES (?, ?, 'pending', ?, ?)
-  `).bind(id, week_of, now, now).run();
+    INSERT INTO weekly_runs (id, week_of, target_send_date, status, created_at, updated_at)
+    VALUES (?, ?, ?, 'pending', ?, ?)
+  `).bind(id, week_of, target_send_date, now, now).run();
 
   run = await env.DB.prepare(`SELECT * FROM weekly_runs WHERE week_of = ?`)
     .bind(week_of)

@@ -1,6 +1,6 @@
 // src/lib/time.js
 const DOW = ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"];
-const DOW_INDEX = Object.fromEntries(DOW.map((d, i) => [d, i]));
+export const DOW_INDEX = Object.fromEntries(DOW.map((d, i) => [d, i]));
 
 function asDate(input) {
   const d = (input instanceof Date) ? input : new Date(input);
@@ -96,4 +96,32 @@ export function isYmd(s) {
 // Format a Date to YYYY-MM-DD using UTC fields
 export function utcDateStr(d) {
   return asDate(d).toISOString().slice(0, 10);
+}
+
+/**
+ * Returns the week_of (Monday YYYY-MM-DD) for the week that contains the
+ * *next* occurrence of sendDow.  If today IS sendDow, returns this week's
+ * Monday.  If today is past sendDow (e.g. Friday when sendDow=TUESDAY),
+ * returns NEXT week's Monday.
+ *
+ * This ensures that generate (Friday) and lock/send (following Tuesday)
+ * always resolve to the same week_of anchor.
+ */
+export function sendWeekOf(tz, now, sendDow) {
+  const d = asDate(now);
+  const { dow } = getPartsInTz(d, tz);
+  const baseMonday = getWeekOf(tz, d);
+  return DOW_INDEX[dow] > DOW_INDEX[sendDow]
+    ? addDays(baseMonday, 7)
+    : baseMonday;
+}
+
+/**
+ * Returns the YYYY-MM-DD of the next occurrence of sendDow in local tz
+ * (returns today if today IS sendDow).  Relies on sendWeekOf, so it shares
+ * the same cross-week-boundary semantics.
+ */
+export function nextSendDateYmd(tz, now, sendDow) {
+  const monday = sendWeekOf(tz, now, sendDow);
+  return addDays(monday, DOW_INDEX[sendDow]);
 }

@@ -8,7 +8,13 @@ import {
   localYmdHhmmToUtcIso,
 } from "./_helpers.mjs";
 
-const WEEK_OF = "2026-02-16"; // Monday
+// After the fix, tick() anchors week_of to the SEND week's Monday so that
+// generate (Friday) and lock/send (following Tuesday) resolve to the same run.
+// Generate fires on Friday Feb 20, which belongs to PREV_WEEK_OF="2026-02-16".
+// Lock and send fire on Tuesday Feb 24, which belongs to SEND_WEEK_OF="2026-02-23".
+// The corrected tick() maps both to SEND_WEEK_OF — tests must reflect that.
+const PREV_WEEK_OF = "2026-02-16"; // Monday of the week containing Friday generate
+const SEND_WEEK_OF = "2026-02-23"; // Monday of the week containing Tuesday lock+send
 
 async function tickAt(isoUtc) {
   const r = await postJson(`/jobs/tick?now=${encodeURIComponent(isoUtc)}`);
@@ -61,21 +67,19 @@ test("tick idempotency: generate stage does not duplicate candidates", async () 
   assert.ok(schedule?.generate?.dow, "config missing schedule.generate.dow");
   assert.ok(schedule?.generate?.time, "config missing schedule.generate.time");
 
-  await resetWeek(WEEK_OF);
+  // Reset the send-week run (the run tick() will write candidates into).
+  await resetWeek(SEND_WEEK_OF);
 
-  const genDate = findDateInWeekMatchingDow(WEEK_OF, schedule.generate.dow, tz);
+  // Generate fires on Friday of the *previous* week; tick() maps it to SEND_WEEK_OF.
+  const genDate = findDateInWeekMatchingDow(PREV_WEEK_OF, schedule.generate.dow, tz);
   const now1 = localYmdHhmmToUtcIso(genDate, schedule.generate.time, tz);
 
-  const before = await getCandidates(WEEK_OF);
-  assert.equal(before.status, "ok");
-  const n0 = (before.candidates ?? before.items ?? []).length;
-
   const t1 = await tickAt(now1);
-  const mid = await getCandidates(WEEK_OF);
+  const mid = await getCandidates(SEND_WEEK_OF);
   const n1 = (mid.candidates ?? mid.items ?? []).length;
 
   const t2 = await tickAt(now1);
-  const after = await getCandidates(WEEK_OF);
+  const after = await getCandidates(SEND_WEEK_OF);
   const n2 = (after.candidates ?? after.items ?? []).length;
 
   // first tick may generate (n1 >= n0), but second tick must not increase again
@@ -102,24 +106,25 @@ test("tick idempotency: lock stage does not re-lock or mutate timestamps", async
   assert.ok(schedule?.lock?.dow, "config missing schedule.lock.dow");
   assert.ok(schedule?.lock?.time, "config missing schedule.lock.time");
 
-  await resetWeek(WEEK_OF);
+  await resetWeek(SEND_WEEK_OF);
 
-  // Ensure candidates exist so lock has something to lock, by running generate once at schedule time.
-  const genDate = findDateInWeekMatchingDow(WEEK_OF, schedule.generate.dow, tz);
+  // Generate fires Friday of PREV_WEEK_OF; candidates land in SEND_WEEK_OF run.
+  const genDate = findDateInWeekMatchingDow(PREV_WEEK_OF, schedule.generate.dow, tz);
   const genNow = localYmdHhmmToUtcIso(genDate, schedule.generate.time, tz);
   await tickAt(genNow);
 
-  const lockDate = findDateInWeekMatchingDow(WEEK_OF, schedule.lock.dow, tz);
+  // Lock fires Tuesday of SEND_WEEK_OF.
+  const lockDate = findDateInWeekMatchingDow(SEND_WEEK_OF, schedule.lock.dow, tz);
   const lockNow = localYmdHhmmToUtcIso(lockDate, schedule.lock.time, tz);
 
   await tickAt(lockNow);
-  const w1 = await getWeekly(WEEK_OF);
+  const w1 = await getWeekly(SEND_WEEK_OF);
   assert.equal(w1.status, "ok");
   const lockedAt1 = w1.weekly_run?.locked_at ?? w1.weekly_run?.lockedAt ?? null;
   assert.ok(lockedAt1, "expected locked_at to be set after first lock tick");
 
   await tickAt(lockNow);
-  const w2 = await getWeekly(WEEK_OF);
+  const w2 = await getWeekly(SEND_WEEK_OF);
   const lockedAt2 = w2.weekly_run?.locked_at ?? w2.weekly_run?.lockedAt ?? null;
 
   assert.equal(lockedAt2, lockedAt1, "locked_at changed on second lock tick (should be idempotent)");
@@ -135,22 +140,22 @@ test("tick idempotency: send_stub stage does not duplicate sends", async () => {
   assert.ok(schedule?.send?.dow, "config missing schedule.send.dow");
   assert.ok(schedule?.send?.time, "config missing schedule.send.time");
 
-  await resetWeek(WEEK_OF);
+  await resetWeek(SEND_WEEK_OF);
 
-  // Run generate + lock once so send has a locked run to operate on.
-  const genDate = findDateInWeekMatchingDow(WEEK_OF, schedule.generate.dow, tz);
+  // Generate fires Friday of PREV_WEEK_OF; lock+send fire Tuesday of SEND_WEEK_OF.
+  const genDate = findDateInWeekMatchingDow(PREV_WEEK_OF, schedule.generate.dow, tz);
   const genNow = localYmdHhmmToUtcIso(genDate, schedule.generate.time, tz);
   await tickAt(genNow);
 
-  const lockDate = findDateInWeekMatchingDow(WEEK_OF, schedule.lock.dow, tz);
+  const lockDate = findDateInWeekMatchingDow(SEND_WEEK_OF, schedule.lock.dow, tz);
   const lockNow = localYmdHhmmToUtcIso(lockDate, schedule.lock.time, tz);
   await tickAt(lockNow);
 
-  const sendDate = findDateInWeekMatchingDow(WEEK_OF, schedule.send.dow, tz);
+  const sendDate = findDateInWeekMatchingDow(SEND_WEEK_OF, schedule.send.dow, tz);
   const sendNow = localYmdHhmmToUtcIso(sendDate, schedule.send.time, tz);
 
   await tickAt(sendNow);
-  const weeklyRunId = await getWeeklyRunIdForWeek(WEEK_OF);
+  const weeklyRunId = await getWeeklyRunIdForWeek(SEND_WEEK_OF);
 
   await tickAt(sendNow);
   const s1 = await getSendsByWeeklyRunId(weeklyRunId);
@@ -169,9 +174,12 @@ test("tick idempotency: send_stub stage does not duplicate sends", async () => {
 
 test("tick state machine: send tick with no candidates skips silently (no 500)", async () => {
   // Use a far-future week that no other test touches.
-  // "2026-06-01" is a Monday; "2026-06-03" (Wednesday) is safe to use as an off-schedule time.
-  const EMPTY_WEEK = "2026-06-01";
-  const OFF_SCHEDULE_DAY = "2026-06-03"; // Wednesday — never matches generate/lock/send defaults
+  // "2026-06-08" is a Monday — use it as both the off-schedule day and the send week.
+  // A Monday tick is safely off-schedule (generate=FRIDAY, lock=TUESDAY, send=TUESDAY).
+  // Crucially, Monday DOW index (0) is NOT greater than Tuesday's (1), so sendWeekOf()
+  // keeps week_of as "2026-06-08" — the same week the Tuesday send tick will resolve to.
+  const EMPTY_WEEK = "2026-06-08";
+  const OFF_SCHEDULE_DAY = "2026-06-08"; // Monday — never matches generate/lock/send defaults
 
   const cfg = await getJson("/admin/config");
   assert.equal(cfg.status, "ok");
@@ -182,10 +190,9 @@ test("tick state machine: send tick with no candidates skips silently (no 500)",
   assert.ok(schedule?.send?.dow, "config missing schedule.send.dow");
   assert.ok(schedule?.send?.time, "config missing schedule.send.time");
 
-  // Tick at an off-schedule time (Wednesday noon) to create the weekly run WITHOUT
+  // Tick at Monday 08:00 (before generate time 09:00) to create the weekly run WITHOUT
   // triggering generate, lock, or send. This leaves a pending run with 0 candidates.
-  // Safe to re-run: ensureWeeklyRun is idempotent; no candidates accumulate.
-  const offNow = localYmdHhmmToUtcIso(OFF_SCHEDULE_DAY, "12:34", tz);
+  const offNow = localYmdHhmmToUtcIso(OFF_SCHEDULE_DAY, "08:00", tz);
   await tickAt(offNow);
 
   // Verify 0 candidates exist for this week (the off-schedule tick must not generate).
