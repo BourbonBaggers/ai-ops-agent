@@ -2,6 +2,9 @@
 .dev.vars
 secrets.*
 
+# Claude Code local settings and memory (never commit)
+.claude/
+
 # Logs
 logs
 *.log
